@@ -25,7 +25,12 @@ use primitives::Blake2Hasher;
 use runtime_version::RuntimeVersion;
 use state_machine::Externalities;
 use std::collections::HashMap;
-use wasmi::{Module as WasmModule, ModuleRef as WasmModuleInstanceRef, RuntimeValue};
+use wasmi::{
+	memory_units::Bytes,
+	Module as WasmModule,
+	ModuleRef as WasmModuleInstanceRef,
+	RuntimeValue
+};
 
 /// A runtime along with its version and initial state snapshot.
 #[derive(Clone)]
@@ -62,10 +67,16 @@ impl StateSnapshot {
 				// The returned used size is a heuristic which returns one more
 				// than the highest memory address that had been written to.
 				// TODO: Analyze this
-				let used_size = memory_ref.used_size().0;
+				let total_size: Bytes = memory_ref.current_size().into();
 
-				memory_ref.get(0, used_size)
-					.expect("extracting data will always succeed since requested range is always valid; qed")
+				memory_ref.get(0, total_size.0)
+					.expect(
+						"we read the whole memory range;
+						the offset is 0;
+						the range's length is equal to the memory size;
+						get must not return an `Err`;
+						qed"
+					)
 			}
 			_ => {
 				trace!(target: "runtimes_cache", "the `memory` export is not of memory kind");
@@ -93,8 +104,7 @@ impl StateSnapshot {
 			.expect("export identifier 'memory' is hardcoded and will always exist; qed");
 		match mem {
 			wasmi::ExternVal::Memory(memory_ref) => {
-				let mem = memory_ref;
-				mem.set(0, &self.memory_contents)
+				memory_ref.set(0, &self.memory_contents)
 					.expect("only putting data back in which was already in; qed");
 			}
 			_ => unreachable!("memory export always exists wasm module; qed"),
