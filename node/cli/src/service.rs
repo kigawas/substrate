@@ -25,6 +25,7 @@ use babe::{import_queue, start_babe, BabeImportQueue, Config};
 use babe_primitives::AuthorityPair as BabePair;
 use client::{self, LongestChain};
 use grandpa::{self, FinalityProofProvider as GrandpaFinalityProofProvider};
+use hbbft::{self};
 use node_executor;
 use primitives::Pair;
 use grandpa_primitives::AuthorityPair as GrandpaPair;
