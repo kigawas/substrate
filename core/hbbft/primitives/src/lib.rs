@@ -3,18 +3,21 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-#[cfg(feature = "std")]
-use serde::Serialize;
-use parity_codec::{Encode, Decode, Codec, Input};
-use sr_primitives::{ConsensusEngineId, traits::{DigestFor, NumberFor}};
 use client::decl_runtime_apis;
-use rstd::vec::Vec;
 use hbbft::{
-    crypto::{PublicKey as HBPublicKey, SecretKey, Signature, PK_SIZE},
-    sync_key_gen::{Ack, AckOutcome, Part, PartOutcome, SyncKeyGen},
+	crypto::{PublicKey as HBPublicKey, SecretKey, Signature, PK_SIZE},
+	sync_key_gen::{Ack, AckOutcome, Part, PartOutcome, SyncKeyGen},
+};
+use parity_codec::{Codec, Decode, Encode, Input};
+use rstd::vec::Vec;
+#[cfg(feature = "std")]
+use serde::{Deserialize, Serialize};
+use sr_primitives::{
+	traits::{DigestFor, NumberFor},
+	ConsensusEngineId,
 };
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Serialize)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Serialize, Deserialize)]
 pub struct PublicKey(HBPublicKey);
 
 impl Default for PublicKey {
@@ -36,20 +39,18 @@ impl Decode for PublicKey {
 		let input_bytes = Decode::decode(input)?;
 		match HBPublicKey::from_bytes(&input_bytes) {
 			Ok(p) => Some(PublicKey(p)),
-			Err(e) => None
+			Err(e) => None,
 		}
 	}
 }
 
-
 #[derive(Debug, Default)] // we derive Default in order to use the clear() method in Drop
 pub struct Keypair {
-    /// The secret half of this keypair.
-    pub secret: SecretKey,
-    /// The public half of this keypair.
-    pub public: PublicKey,
+	/// The secret half of this keypair.
+	pub secret: SecretKey,
+	/// The public half of this keypair.
+	pub public: PublicKey,
 }
-
 
 #[cfg(feature = "std")]
 pub type AuthorityPair = Keypair;

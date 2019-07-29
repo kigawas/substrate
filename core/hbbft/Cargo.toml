@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 hbbft = "0.1"
+crossbeam = "0.7"
 fork-tree = { path = "../../core/utils/fork-tree" }
 futures = "0.1"
 futures03 = { package = "futures-preview", version = "0.3.0-alpha.17", features = ["compat"] }
@@ -15,6 +16,7 @@ tokio-executor = "0.1.7"
 tokio-timer = "0.2.11"
 rand = "0.6"
 parity-codec = { version = "4.1.1", features = ["derive"] }
+multihash = { package="parity-multihash",  version = "0.1.3"}
 runtime_primitives = { package = "sr-primitives", path = "../sr-primitives" }
 consensus_common = { package = "substrate-consensus-common", path = "../consensus/common" }
 substrate-primitives = { path = "../primitives" }
