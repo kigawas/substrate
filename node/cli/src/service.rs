@@ -24,25 +24,24 @@ use std::time::Duration;
 use babe::{import_queue, start_babe, BabeImportQueue, Config};
 use babe_primitives::AuthorityPair as BabePair;
 use client::{self, LongestChain};
-use grandpa::{self, FinalityProofProvider as GrandpaFinalityProofProvider};
-use hbbft::{self};
-use node_executor;
-use primitives::Pair;
-use grandpa_primitives::AuthorityPair as GrandpaPair;
 use futures::prelude::*;
+use grandpa::{self, FinalityProofProvider as GrandpaFinalityProofProvider};
+use grandpa_primitives::AuthorityPair as GrandpaPair;
+use hbbft::{self, run_key_gen};
+use inherents::InherentDataProviders;
+use log::info;
+use network::construct_simple_protocol;
+use node_executor;
 use node_primitives::Block;
 use node_runtime::{GenesisConfig, RuntimeApi};
-use substrate_service::{
-	FactoryFullConfiguration, LightComponents, FullComponents, FullBackend,
-	FullClient, LightClient, LightBackend, FullExecutor, LightExecutor,
-	error::{Error as ServiceError},
-};
-use transaction_pool::{self, txpool::{Pool as TransactionPool}};
-use inherents::InherentDataProviders;
-use network::construct_simple_protocol;
+use primitives::Pair;
 use substrate_service::construct_service_factory;
-use log::info;
 use substrate_service::TelemetryOnConnect;
+use substrate_service::{
+	error::Error as ServiceError, FactoryFullConfiguration, FullBackend, FullClient,
+	FullComponents, FullExecutor, LightBackend, LightClient, LightComponents, LightExecutor,
+};
+use transaction_pool::{self, txpool::Pool as TransactionPool};
 
 construct_simple_protocol! {
 	/// Demo protocol attachment for substrate.
@@ -59,7 +58,7 @@ type BabeBlockImportForService<F> = babe::BabeBlockImport<
 		FullBackend<F>,
 		FullExecutor<F>,
 		<F as crate::ServiceFactory>::Block,
-		<F as crate::ServiceFactory>::RuntimeApi
+		<F as crate::ServiceFactory>::RuntimeApi,
 	>,
 >;
 
@@ -77,7 +76,10 @@ pub struct NodeConfig<F: substrate_service::ServiceFactory> {
 	inherent_data_providers: InherentDataProviders,
 }
 
-impl<F> Default for NodeConfig<F> where F: substrate_service::ServiceFactory {
+impl<F> Default for NodeConfig<F>
+where
+	F: substrate_service::ServiceFactory,
+{
 	fn default() -> NodeConfig<F> {
 		NodeConfig {
 			import_setup: None,
@@ -187,6 +189,7 @@ construct_service_factory! {
 							telemetry_on_connect: Some(telemetry_on_connect),
 						};
 						service.spawn_task(Box::new(grandpa::run_grandpa_voter(grandpa_config)?));
+						service.spawn_task(Box::new(hbbft::run_key_gen(service.network())?));
 					},
 				}
 
@@ -257,34 +260,38 @@ construct_service_factory! {
 	}
 }
 
-
 #[cfg(test)]
 mod tests {
-	use std::sync::Arc;
+	use crate::service::Factory;
 	use babe::CompatibleDigestItem;
-	use consensus_common::{Environment, Proposer, BlockImportParams, BlockOrigin, ForkChoiceStrategy};
-	use node_primitives::DigestItem;
-	use node_runtime::{BalancesCall, Call, UncheckedExtrinsic};
-	use node_runtime::constants::{currency::CENTS, time::SLOT_DURATION};
-	use parity_codec::{Encode, Decode};
-	use primitives::{
-		crypto::Pair as CryptoPair, blake2_256,
-		sr25519::Public as AddressPublic, H256,
+	use consensus_common::{
+		BlockImportParams, BlockOrigin, Environment, ForkChoiceStrategy, Proposer,
 	};
-	use sr_primitives::{generic::{BlockId, Era, Digest}, traits::Block, OpaqueExtrinsic};
-	use timestamp;
 	use finality_tracker;
 	use keyring::{AccountKeyring, Sr25519Keyring};
-	use substrate_service::ServiceFactory;
+	use node_primitives::DigestItem;
+	use node_runtime::constants::{currency::CENTS, time::SLOT_DURATION};
+	use node_runtime::{BalancesCall, Call, UncheckedExtrinsic};
+	use parity_codec::{Decode, Encode};
+	use primitives::{
+		blake2_256, crypto::Pair as CryptoPair, sr25519::Public as AddressPublic, H256,
+	};
 	use service_test::SyncService;
-	use crate::service::Factory;
+	use sr_primitives::{
+		generic::{BlockId, Digest, Era},
+		traits::Block,
+		OpaqueExtrinsic,
+	};
+	use std::sync::Arc;
+	use substrate_service::ServiceFactory;
+	use timestamp;
 
 	#[cfg(feature = "rhd")]
 	fn test_sync() {
 		use primitives::ed25519::Pair;
 
-		use {service_test, Factory};
 		use client::{BlockImportParams, BlockOrigin};
+		use {service_test, Factory};
 
 		let alice: Arc<ed25519::Pair> = Arc::new(Keyring::Alice.into());
 		let bob: Arc<ed25519::Pair> = Arc::new(Keyring::Bob.into());
@@ -302,7 +309,9 @@ mod tests {
 				force_delay: 0,
 				handle: dummy_runtime.executor(),
 			};
-			let (proposer, _, _) = proposer_factory.init(&parent_header, &validators, alice.clone()).unwrap();
+			let (proposer, _, _) = proposer_factory
+				.init(&parent_header, &validators, alice.clone())
+				.unwrap();
 			let block = proposer.propose().expect("Error making test block");
 			BlockImportParams {
 				origin: BlockOrigin::File,
@@ -314,22 +323,27 @@ mod tests {
 				auxiliary: Vec::new(),
 			}
 		};
-		let extrinsic_factory = |service: &SyncService<<Factory as service::ServiceFactory>::FullService>| {
-			let payload = (
-				0,
-				Call::Balances(BalancesCall::transfer(RawAddress::Id(bob.public().0.into()), 69.into())),
-				Era::immortal(),
-				service.client().genesis_hash()
-			);
-			let signature = alice.sign(&payload.encode()).into();
-			let id = alice.public().0.into();
-			let xt = UncheckedExtrinsic {
-				signature: Some((RawAddress::Id(id), signature, payload.0, Era::immortal())),
-				function: payload.1,
-			}.encode();
-			let v: Vec<u8> = Decode::decode(&mut xt.as_slice()).unwrap();
-			OpaqueExtrinsic(v)
-		};
+		let extrinsic_factory =
+			|service: &SyncService<<Factory as service::ServiceFactory>::FullService>| {
+				let payload = (
+					0,
+					Call::Balances(BalancesCall::transfer(
+						RawAddress::Id(bob.public().0.into()),
+						69.into(),
+					)),
+					Era::immortal(),
+					service.client().genesis_hash(),
+				);
+				let signature = alice.sign(&payload.encode()).into();
+				let id = alice.public().0.into();
+				let xt = UncheckedExtrinsic {
+					signature: Some((RawAddress::Id(id), signature, payload.0, Era::immortal())),
+					function: payload.1,
+				}
+				.encode();
+				let v: Vec<u8> = Decode::decode(&mut xt.as_slice()).unwrap();
+				OpaqueExtrinsic(v)
+			};
 		service_test::sync::<Factory, _, _>(
 			chain_spec::integration_test_config(),
 			block_factory,
@@ -366,7 +380,8 @@ mod tests {
 			// even though there's only one authority some slots might be empty,
 			// so we must keep trying the next slots until we can claim one.
 			let babe_pre_digest = loop {
-				inherent_data.replace_data(timestamp::INHERENT_IDENTIFIER, &(slot_num * SLOT_DURATION));
+				inherent_data
+					.replace_data(timestamp::INHERENT_IDENTIFIER, &(slot_num * SLOT_DURATION));
 				if let Some(babe_pre_digest) = babe::test_helpers::claim_slot(
 					&*service.client(),
 					&parent_id,
@@ -380,14 +395,17 @@ mod tests {
 				slot_num += 1;
 			};
 
-			digest.push(<DigestItem as CompatibleDigestItem>::babe_pre_digest(babe_pre_digest));
+			digest.push(<DigestItem as CompatibleDigestItem>::babe_pre_digest(
+				babe_pre_digest,
+			));
 
 			let mut proposer = proposer_factory.init(&parent_header).unwrap();
 			let new_block = futures03::executor::block_on(proposer.propose(
 				inherent_data,
 				digest,
 				std::time::Duration::from_secs(1),
-			)).expect("Error making test block");
+			))
+			.expect("Error making test block");
 
 			let (new_header, new_body) = new_block.deconstruct();
 			let pre_hash = new_header.hash();
@@ -395,9 +413,7 @@ mod tests {
 			// add it to a digest item.
 			let to_sign = pre_hash.encode();
 			let signature = alice.sign(&to_sign[..]);
-			let item = <DigestItem as CompatibleDigestItem>::babe_seal(
-				signature,
-			);
+			let item = <DigestItem as CompatibleDigestItem>::babe_seal(signature);
 			slot_num += 1;
 
 			BlockImportParams {
@@ -416,7 +432,9 @@ mod tests {
 		let charlie = Arc::new(AccountKeyring::Charlie.pair());
 
 		let mut index = 0;
-		let extrinsic_factory = |service: &SyncService<<Factory as ServiceFactory>::FullService>| {
+		let extrinsic_factory = |service: &SyncService<
+			<Factory as ServiceFactory>::FullService,
+		>| {
 			let amount = 5 * CENTS;
 			let to = AddressPublic::from_raw(bob.public().0);
 			let from = AddressPublic::from_raw(charlie.public().0);
@@ -432,28 +450,23 @@ mod tests {
 			let extra = (check_era, check_nonce, check_weight, take_fees);
 
 			let raw_payload = (function, extra.clone(), genesis_hash);
-			let signature = raw_payload.using_encoded(|payload| if payload.len() > 256 {
-				signer.sign(&blake2_256(payload)[..])
-			} else {
-				signer.sign(payload)
+			let signature = raw_payload.using_encoded(|payload| {
+				if payload.len() > 256 {
+					signer.sign(&blake2_256(payload)[..])
+				} else {
+					signer.sign(payload)
+				}
 			});
-			let xt = UncheckedExtrinsic::new_signed(
-				raw_payload.0,
-				from.into(),
-				signature.into(),
-				extra,
-			).encode();
+			let xt =
+				UncheckedExtrinsic::new_signed(raw_payload.0, from.into(), signature.into(), extra)
+					.encode();
 			let v: Vec<u8> = Decode::decode(&mut xt.as_slice()).unwrap();
 
 			index += 1;
 			OpaqueExtrinsic(v)
 		};
 
-		service_test::sync::<Factory, _, _>(
-			chain_spec,
-			block_factory,
-			extrinsic_factory,
-		);
+		service_test::sync::<Factory, _, _>(chain_spec, block_factory, extrinsic_factory);
 	}
 
 	#[test]
@@ -463,10 +476,7 @@ mod tests {
 
 		service_test::consensus::<Factory>(
 			crate::chain_spec::tests::integration_test_config_with_two_authorities(),
-			vec![
-				"//Alice".into(),
-				"//Bob".into(),
-			],
+			vec!["//Alice".into(), "//Bob".into()],
 		)
 	}
 }
