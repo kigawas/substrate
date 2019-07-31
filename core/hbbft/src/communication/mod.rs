@@ -9,12 +9,16 @@ use hbbft::{
 
 use network::{consensus_gossip as network_gossip, NetworkService};
 use network_gossip::ConsensusMessage;
-use runtime_primitives::traits::{Block as BlockT, DigestFor, NumberFor, ProvideRuntimeApi};
+use runtime_primitives::traits::{
+	Block as BlockT, DigestFor, Hash as HashT, Header as HeaderT, NumberFor, ProvideRuntimeApi,
+};
 
 pub use hbbft_primitives::HBBFT_ENGINE_ID;
 
 mod gossip;
 mod peer;
+
+pub use gossip::GossipValidator;
 
 pub struct NetworkStream {
 	inner: Option<mpsc::UnboundedReceiver<network_gossip::TopicNotification>>,
@@ -39,6 +43,15 @@ impl Stream for NetworkStream {
 			Err(_) => Err(()),
 		}
 	}
+}
+
+/// Create a unique topic for a round and set-id combo.
+pub(crate) fn round_topic<B: BlockT>(round: u64, set_id: u64) -> B::Hash {
+	<<B::Header as HeaderT>::Hashing as HashT>::hash(format!("{}-{}", set_id, round).as_bytes())
+}
+
+pub(crate) fn global_topic<B: BlockT>(epoch: u64) -> B::Hash {
+	<<B::Header as HeaderT>::Hashing as HashT>::hash(format!("{}-GLOBAL", epoch).as_bytes())
 }
 
 pub trait Network<Block: BlockT>: Clone + Send + 'static {

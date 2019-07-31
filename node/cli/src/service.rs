@@ -27,7 +27,7 @@ use client::{self, LongestChain};
 use futures::prelude::*;
 use grandpa::{self, FinalityProofProvider as GrandpaFinalityProofProvider};
 use grandpa_primitives::AuthorityPair as GrandpaPair;
-use hbbft::{self, run_key_gen};
+use hbbft::{self};
 use inherents::InherentDataProviders;
 use log::info;
 use network::construct_simple_protocol;
