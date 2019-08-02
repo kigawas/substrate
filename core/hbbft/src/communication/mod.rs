@@ -30,6 +30,7 @@ impl Stream for NetworkStream {
 	type Error = ();
 
 	fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+		println!("polling in network stream");
 		if let Some(ref mut inner) = self.inner {
 			return inner.poll();
 		}
@@ -100,7 +101,7 @@ where
 			let inner_rx = gossip.messages_for(HBBFT_ENGINE_ID, topic);
 			let _ = tx.send(inner_rx);
 		});
-		NetworkStream {
+		Self::In {
 			outer: rx,
 			inner: None,
 		}
@@ -149,5 +150,22 @@ where
 
 	fn announce(&self, block: B::Hash) {
 		self.announce_block(block)
+	}
+}
+
+pub(crate) struct NetworkBridge<B: BlockT, N: Network<B>> {
+	service: N,
+	validator: Arc<GossipValidator<B>>,
+}
+
+impl<B: BlockT, N: Network<B>> NetworkBridge<B, N> {
+	pub fn new(service: N, config: crate::NodeConfig) -> Self {
+		let validator = Arc::new(GossipValidator::new());
+		service.register_validator(validator.clone());
+
+		let topic = global_topic::<B>(1);
+		service.register_gossip_message(topic, vec![0u8, 1u8]);
+
+		Self { service, validator }
 	}
 }

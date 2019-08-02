@@ -62,8 +62,8 @@ impl Decode for PeerId {
 	}
 }
 
-unsafe impl Send for PeerId {}
-unsafe impl Sync for PeerId {}
+// unsafe impl Send for PeerId {}
+// unsafe impl Sync for PeerId {}
 
 #[derive(Clone, Debug)]
 enum PeerPhase {
