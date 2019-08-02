@@ -1,24 +1,24 @@
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 use futures::prelude::*;
 use futures::sync::{mpsc, oneshot};
+use gossip::{GossipMessage, GossipValidator};
 use hbbft::{
 	crypto::{PublicKey, SecretKey},
 	sync_key_gen::{Ack, AckOutcome, Part, PartOutcome, SyncKeyGen},
 };
-
+use hbbft_primitives::{AuthorityId, Keypair};
 use network::{consensus_gossip as network_gossip, NetworkService};
 use network_gossip::ConsensusMessage;
+use parity_codec::{Decode, Encode};
 use runtime_primitives::traits::{
 	Block as BlockT, DigestFor, Hash as HashT, Header as HeaderT, NumberFor, ProvideRuntimeApi,
 };
 
 pub use hbbft_primitives::HBBFT_ENGINE_ID;
 
-mod gossip;
+pub mod gossip;
 mod peer;
-
-pub use gossip::GossipValidator;
 
 pub struct NetworkStream {
 	inner: Option<mpsc::UnboundedReceiver<network_gossip::TopicNotification>>,
@@ -153,6 +153,60 @@ where
 	}
 }
 
+#[derive(Debug, Encode, Decode)]
+pub struct SignedMessage<B: BlockT> {
+	data: u64,
+	sig: u64,
+	_phantom: PhantomData<B>,
+}
+
+#[derive(Debug, Encode, Decode)]
+pub struct Message<B: BlockT> {
+	data: u64,
+	_phantom: PhantomData<B>,
+}
+
+#[derive(Debug)]
+pub enum Error {
+	Network(String),
+}
+
+struct MessageSender<Block: BlockT, N: Network<Block>> {
+	locals: Option<(Arc<Keypair>, AuthorityId)>,
+	sender: mpsc::UnboundedSender<SignedMessage<Block>>,
+	network: N,
+}
+
+impl<Block: BlockT, N: Network<Block>> Sink for MessageSender<Block, N> {
+	type SinkItem = Message<Block>;
+	type SinkError = Error;
+
+	fn start_send(&mut self, mut msg: Message<Block>) -> StartSend<Message<Block>, Error> {
+		let signed = SignedMessage {
+			data: msg.data,
+			sig: 0,
+			_phantom: PhantomData,
+		};
+
+		let topic = global_topic::<Block>(2);
+		self.network.gossip_message(topic, msg.encode(), false);
+
+		// forward the message to the inner sender.
+		let _ = self.sender.unbounded_send(signed);
+
+		Ok(AsyncSink::Ready)
+	}
+
+	fn poll_complete(&mut self) -> Poll<(), Error> {
+		Ok(Async::Ready(()))
+	}
+
+	fn close(&mut self) -> Poll<(), Error> {
+		// ignore errors since we allow this inner sender to be closed already.
+		self.sender.close().or_else(|_| Ok(Async::Ready(())))
+	}
+}
+
 pub(crate) struct NetworkBridge<B: BlockT, N: Network<B>> {
 	service: N,
 	validator: Arc<GossipValidator<B>>,
@@ -167,5 +221,44 @@ impl<B: BlockT, N: Network<B>> NetworkBridge<B, N> {
 		service.register_gossip_message(topic, vec![0u8, 1u8]);
 
 		Self { service, validator }
+	}
+
+	pub fn global(
+		&self,
+	) -> (
+		impl Stream<Item = SignedMessage<B>, Error = Error>,
+		impl Sink<SinkItem = Message<B>, SinkError = Error>,
+	) {
+		let topic = global_topic::<B>(1);
+
+		let incoming = self
+			.service
+			.messages_for(topic)
+			.filter_map(|notification| {
+				let decoded = GossipMessage::<B>::decode(&mut &notification.message[..]);
+				decoded
+			})
+			.and_then(move |msg| match msg {
+				GossipMessage::Message(msg) => {
+					println!("gossip msg: {:?}", msg);
+
+					Ok(Some(msg))
+				}
+			})
+			.filter_map(|x| x)
+			.map_err(|()| Error::Network(format!("Failed to receive message on unbounded stream")));
+
+		let (tx, out_rx) = mpsc::unbounded();
+		let sender = MessageSender::<B, N> {
+			locals: None,
+			sender: tx,
+			network: self.service.clone(),
+		};
+
+		let out_rx = out_rx.map_err(move |()| Error::Network(format!("Network Error!")));
+
+		let incoming = incoming.select(out_rx);
+
+		(incoming, sender)
 	}
 }

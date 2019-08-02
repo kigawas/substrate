@@ -14,7 +14,7 @@ use hbbft_primitives::HbbftApi;
 use inherents::InherentDataProviders;
 use log::{debug, info, warn};
 use network;
-use parity_codec::Encode;
+use parity_codec::{Decode, Encode};
 use runtime_primitives::generic::BlockId;
 use runtime_primitives::traits::{Block as BlockT, DigestFor, NumberFor, ProvideRuntimeApi};
 use serde_json;
@@ -28,6 +28,7 @@ pub use communication::Network;
 mod tests;
 
 mod communication;
+use communication::gossip::GossipMessage;
 
 #[derive(Clone)]
 pub struct NodeConfig {
@@ -56,25 +57,17 @@ where
 		name: None,
 	};
 	let bridge = communication::NetworkBridge::new(network.clone(), config);
-	println!("setup network bridge OK");
 
 	let key_gen_work = futures::future::loop_fn(initial_state, move |params| {
 		println!("aaa");
+		let (mut incoming, outgoing) = bridge.global();
 
-		Ok(FutureLoop::Break(()))
+		let p = incoming.poll();
+		println!("{:?}", p);
+
+		Ok(FutureLoop::Continue((1)))
 	});
 
-	let topic = communication::global_topic::<Block>(1);
-	let on_message = network.messages_for(topic).for_each(|notification| {
-		println!("noti {:?}", notification);
 
-		Ok(())
-	});
-
-	// let (tx, out_rx) = mpsc::unbounded();
-	// let on_message = on_message.select(out_rx);
-
-	// Ok(key_gen_work.select2(on_message).then(|_| Ok(())))
-	// Ok(key_gen_work)
-	Ok(on_message)
+	Ok(key_gen_work)
 }

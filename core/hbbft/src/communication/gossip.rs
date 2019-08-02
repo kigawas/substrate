@@ -72,8 +72,10 @@ pub(super) enum NetworkState {
 	Active(ActiveNetworkInfo),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub(super) enum GossipMessage {}
+#[derive(Debug, Encode, Decode)]
+pub enum GossipMessage<Block: BlockT> {
+	Message(super::SignedMessage<Block>),
+}
 
 pub struct GossipValidator<Block: BlockT> {
 	inner: parking_lot::RwLock<u64>,
