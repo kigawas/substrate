@@ -262,3 +262,12 @@ impl<B: BlockT, N: Network<B>> NetworkBridge<B, N> {
 		(incoming, sender)
 	}
 }
+
+impl<B: BlockT, N: Network<B>> Clone for NetworkBridge<B, N> {
+	fn clone(&self) -> Self {
+		NetworkBridge {
+			service: self.service.clone(),
+			validator: Arc::clone(&self.validator),
+		}
+	}
+}

@@ -13,7 +13,6 @@ futures03 = { package = "futures-preview", version = "0.3.0-alpha.17", features 
 log = "0.4"
 parking_lot = "0.8.0"
 tokio-executor = "0.1.7"
-tokio-timer = "0.2.11"
 rand = "0.6"
 parity-codec = { version = "4.1.1", features = ["derive"] }
 multihash = { package="parity-multihash",  version = "0.1.3"}
@@ -29,6 +28,7 @@ network = { package = "substrate-network", path = "../network" }
 service = { package = "substrate-service", path = "../service", optional = true }
 srml-finality-tracker = { path = "../../srml/finality-tracker" }
 hbbft-primitives = { package = "substrate-hbbft-primitives", path = "primitives" }
+futures-timer = "0.1"
 
 [dev-dependencies]
 network = { package = "substrate-network", path = "../network", features = ["test-helpers"] }

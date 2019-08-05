@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use client::blockchain::HeaderBackend;
 use client::{
@@ -6,9 +7,8 @@ use client::{
 	Client,
 };
 use consensus_common::SelectChain;
-use futures::future::Loop as FutureLoop;
-use futures::prelude::*;
-use futures::sync::mpsc;
+use futures::{future::Loop as FutureLoop, prelude::*, sync::mpsc};
+use futures_timer::Interval;
 use hbbft::crypto::{PublicKey, SecretKey, SignatureShare};
 use hbbft_primitives::HbbftApi;
 use inherents::InherentDataProviders;
@@ -51,23 +51,68 @@ pub fn run_key_gen<Block: BlockT<Hash = H256>, N>(
 where
 	N: Network<Block> + Send + Sync + 'static,
 {
-	let initial_state = 1;
 	let config = NodeConfig {
 		local_key: None,
 		name: None,
 	};
-	let bridge = communication::NetworkBridge::new(network.clone(), config);
+	let bridge = communication::NetworkBridge::new(network, config.clone());
+	let initial_state = 1;
+
+	let dur = Duration::from_secs(3);
+	// let stream = Interval::new(dur).map(|()| println!("prints every four seconds"));
 
 	let key_gen_work = futures::future::loop_fn(initial_state, move |params| {
-		println!("aaa");
-		let (mut incoming, outgoing) = bridge.global();
+		println!("key gen work");
+		let bridge = bridge.clone();
+		// let p = incoming.poll();
 
-		let p = incoming.poll();
-		println!("{:?}", p);
+		// println!("{:?}", p);
 
-		Ok(FutureLoop::Continue((1)))
+		let poll_voter = futures::future::poll_fn(move || -> Result<_> {
+			// let poll_voter = Interval::new(dur).map(|_| {
+			println!("in poll loop");
+			// let bridge = bridge.clone();
+			let (mut incoming, outgoing) = bridge.global();
+
+			match incoming.poll() {
+				Ok(r) => match r {
+					Async::Ready(Some(item)) => {
+						println!("{:?}", item);
+						return Ok(Async::Ready(Some(item)));
+					}
+					Async::Ready(None) => {
+						println!("None");
+						return Ok(Async::Ready(None));
+					}
+					Async::NotReady => {
+						println!("Not ready");
+						return Ok(Async::NotReady);
+					}
+				},
+				Err(_) => return Err(ClientError::Msg("error when polling".to_string())),
+			}
+		});
+
+		poll_voter.then(move |res| {
+			println!("poll voter res {:?}", res);
+			match res {
+				Ok(_) => Ok(FutureLoop::Continue((1))),
+				Err(_) => Ok(FutureLoop::Break(())),
+			}
+		})
 	});
 
+	// let dummy = futures::future::loop_fn(initial_state, move |params| {
+	// 	println!("dummy work");
+	// 	Ok(FutureLoop::Break(()))
+	// });
 
+	// let poll_voter = poll_voter.then(|_| Ok(FutureLoop::Break(())));
+	// let key_gen_work = key_gen_work
+	// 	.map(|_| ())
+	// 	.map_err(|e| println!("key gen error"));
+	// .then(move |res| Ok(FutureLoop::Continue((1))))
+	// .map(|_| ());
+	// Ok(dummy)
 	Ok(key_gen_work)
 }
