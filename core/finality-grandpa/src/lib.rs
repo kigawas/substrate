@@ -640,13 +640,12 @@ where
 		// needs to be combined with another future otherwise it can deadlock.
 		let poll_voter = future::poll_fn(move || {
 			println!("voter poll ");
-			match maybe_voter {
-				Some(ref mut voter) => {
-					println!("voter poll: Some");
-					voter.poll()
-				}
+			let v = match maybe_voter {
+				Some(ref mut voter) => voter.poll(),
 				None => Ok(Async::NotReady),
-			}
+			};
+			println!("maybe voter: {:?}", v);
+			v
 		});
 
 		let client = client.clone();

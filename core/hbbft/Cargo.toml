@@ -28,7 +28,7 @@ network = { package = "substrate-network", path = "../network" }
 service = { package = "substrate-service", path = "../service", optional = true }
 srml-finality-tracker = { path = "../../srml/finality-tracker" }
 hbbft-primitives = { package = "substrate-hbbft-primitives", path = "primitives" }
-futures-timer = "0.1"
+tokio-timer = "0.2.11"
 
 [dev-dependencies]
 network = { package = "substrate-network", path = "../network", features = ["test-helpers"] }

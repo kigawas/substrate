@@ -30,7 +30,6 @@ impl Stream for NetworkStream {
 	type Error = ();
 
 	fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-		println!("polling in network stream");
 		if let Some(ref mut inner) = self.inner {
 			return inner.poll();
 		}
