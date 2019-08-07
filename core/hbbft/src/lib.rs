@@ -48,32 +48,56 @@ impl NodeConfig {
 	}
 }
 
-// struct Worker<Block: BlockT, S: Stream> {
-// 	incoming: S,
-// 	check_pending: Interval,
-// 	_phantom: PhantomData<Block>,
-// }
+struct Worker<Block: BlockT, S: Stream> {
+	incoming: S,
+	check_pending: Interval,
+	_phantom: PhantomData<Block>,
+}
 
-// impl<Block: BlockT, S: Stream> Worker<Block, S> {
-// 	fn new(stream: S) -> Self {
-// 		let now = Instant::now();
-// 		let dur = Duration::from_secs(5);
-// 		let check_pending = Interval::new(now + dur, dur);
+impl<Block: BlockT, S: Stream> Worker<Block, S> {
+	fn new(stream: S) -> Self {
+		let now = Instant::now();
+		let dur = Duration::from_secs(5);
+		let check_pending = Interval::new(now + dur, dur);
 
-// 		Self {
-// 			incoming: stream,
-// 			check_pending,
-// 			_phantom: PhantomData,
-// 		}
-// 	}
-// }
+		Self {
+			incoming: stream.fuse(),
+			check_pending,
+			_phantom: PhantomData,
+		}
+	}
+}
 
-// impl<Block: BlockT, S: Stream> Stream for Worker<Block, S> {
-// 	type Item = ();
-// 	type Error = ClientError;
+impl<Block: BlockT, S: Stream> Stream for Worker<Block, S> {
+	type Item = u64;
+	type Error = ClientError;
 
-// 	fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {}
-// }
+	fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+		loop {
+			match self.inner.poll()? {
+				Async::Ready(None) => return Ok(Async::Ready(None)),
+				Async::Ready(Some(input)) => {
+					println!("{:?}", input);
+					return Ok(Async::Ready(input));
+				}
+				Async::NotReady => break,
+			}
+		}
+		while let Async::Ready(Some(p)) = self
+			.check_pending
+			.poll()
+			.map_err(|e| ClientError::Msg("pending err".to_string()))?
+		{
+			println!("pending interval res {:?}", p);
+		}
+
+		if self.inner.is_done() {
+			Ok(Async::Ready(None))
+		} else {
+			Ok(Async::NotReady)
+		}
+	}
+}
 
 pub fn run_key_gen<Block: BlockT<Hash = H256>, N>(
 	network: N,
