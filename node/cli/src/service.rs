@@ -264,6 +264,7 @@ construct_service_factory! {
 mod tests {
 	use crate::service::Factory;
 	use babe::CompatibleDigestItem;
+	use codec::{Decode, Encode};
 	use consensus_common::{
 		BlockImportParams, BlockOrigin, Environment, ForkChoiceStrategy, Proposer,
 	};
@@ -271,8 +272,6 @@ mod tests {
 	use keyring::{AccountKeyring, Sr25519Keyring};
 	use node_primitives::DigestItem;
 	use node_runtime::constants::{currency::CENTS, time::SLOT_DURATION};
-	use node_runtime::{BalancesCall, Call, UncheckedExtrinsic};
-	use parity_codec::{Decode, Encode};
 	use primitives::{
 		blake2_256, crypto::Pair as CryptoPair, sr25519::Public as AddressPublic, H256,
 	};

@@ -53,9 +53,7 @@
 //! included in the newly-finalized chain.
 
 use client::blockchain::HeaderBackend;
-use client::{
-	backend::Backend, error::Error as ClientError, BlockchainEvents, CallExecutor, Client,
-};
+use codec::Encode;
 use consensus_common::SelectChain;
 use fg_primitives::GrandpaApi;
 use futures::prelude::*;
@@ -66,6 +64,7 @@ use parity_codec::Encode;
 use primitives::{ed25519, Blake2Hasher, Pair, H256};
 use serde_json;
 use sr_primitives::generic::BlockId;
+use sr_primitives::traits::{Block as BlockT, DigestFor, NumberFor, ProvideRuntimeApi};
 use sr_primitives::traits::{Block as BlockT, DigestFor, NumberFor, ProvideRuntimeApi};
 use substrate_telemetry::{telemetry, CONSENSUS_DEBUG, CONSENSUS_INFO, CONSENSUS_WARN};
 
