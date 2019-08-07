@@ -171,7 +171,6 @@ where
 
 		let mut update_interval = false;
 		while let Async::Ready(Some(_)) = self.check_pending.poll().map_err(Error::Timer)? {
-			println!("UPDATE INTERVAL");
 			update_interval = true;
 		}
 

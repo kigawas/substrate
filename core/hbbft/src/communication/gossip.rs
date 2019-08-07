@@ -4,10 +4,10 @@ use std::{
 	time::{Duration, Instant},
 };
 
+use codec::{Decode, Encode};
 use hbbft_primitives::AuthorityId;
 use network::consensus_gossip::{self as network_gossip, MessageIntent, ValidatorContext};
 use network::{config::Roles, PeerId as NPeerId};
-use parity_codec::{Decode, Encode};
 use runtime_primitives::traits::{Block as BlockT, NumberFor, Zero};
 
 use futures::prelude::*;
@@ -127,8 +127,7 @@ impl<Block: BlockT> network_gossip::Validator<Block> for GossipValidator<Block> 
 		};
 
 		Box::new(move |who, intent, topic, mut data| {
-			println!("inner value {:?}", inner);
-			println!("in message allowed {:?}", data);
+			println!("message_allowed  inner: {:?}, data: {:?}", inner, data);
 			true
 		})
 	}
@@ -136,7 +135,7 @@ impl<Block: BlockT> network_gossip::Validator<Block> for GossipValidator<Block> 
 	fn message_expired<'a>(&'a self) -> Box<dyn FnMut(Block::Hash, &[u8]) -> bool + 'a> {
 		let inner = self.inner.read();
 		Box::new(move |topic, mut data| {
-			println!("in message expired {:?}", data);
+			println!("message_expired {:?}", data);
 			match *inner {
 				1 => false,
 				_ => true,

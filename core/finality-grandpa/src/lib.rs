@@ -53,6 +53,9 @@
 //! included in the newly-finalized chain.
 
 use client::blockchain::HeaderBackend;
+use client::{
+	backend::Backend, error::Error as ClientError, BlockchainEvents, CallExecutor, Client,
+};
 use codec::Encode;
 use consensus_common::SelectChain;
 use fg_primitives::GrandpaApi;
@@ -60,11 +63,9 @@ use futures::prelude::*;
 use futures::sync::mpsc;
 use inherents::InherentDataProviders;
 use log::{debug, info, warn};
-use parity_codec::Encode;
 use primitives::{ed25519, Blake2Hasher, Pair, H256};
 use serde_json;
 use sr_primitives::generic::BlockId;
-use sr_primitives::traits::{Block as BlockT, DigestFor, NumberFor, ProvideRuntimeApi};
 use sr_primitives::traits::{Block as BlockT, DigestFor, NumberFor, ProvideRuntimeApi};
 use substrate_telemetry::{telemetry, CONSENSUS_DEBUG, CONSENSUS_INFO, CONSENSUS_WARN};
 
@@ -603,8 +604,6 @@ where
 			VoterSetState::Live {
 				completed_rounds, ..
 			} => {
-				println!("check voter live");
-
 				let chain_info = client.info();
 
 				let last_finalized = (
@@ -637,14 +636,9 @@ where
 		};
 
 		// needs to be combined with another future otherwise it can deadlock.
-		let poll_voter = future::poll_fn(move || {
-			println!("voter poll ");
-			let v = match maybe_voter {
-				Some(ref mut voter) => voter.poll(),
-				None => Ok(Async::NotReady),
-			};
-			println!("maybe voter: {:?}", v);
-			v
+		let poll_voter = future::poll_fn(move || match maybe_voter {
+			Some(ref mut voter) => voter.poll(),
+			None => Ok(Async::NotReady),
 		});
 
 		let client = client.clone();
@@ -655,7 +649,6 @@ where
 		let consensus_changes = consensus_changes.clone();
 
 		let handle_voter_command = move |command: VoterCommand<_, _>, voter_commands_rx| {
-			println!("handle voter cmd");
 			match command {
 				VoterCommand::ChangeAuthorities(new) => {
 					let voters: Vec<String> = new
@@ -726,12 +719,9 @@ where
 			}
 		};
 
-		println!("==========================================");
-
-		poll_voter.select2(voter_commands_rx).then(move |res| {
-			println!("select voter");
-
-			match res {
+		poll_voter
+			.select2(voter_commands_rx)
+			.then(move |res| match res {
 				Ok(future::Either::A(((), _))) => {
 					// voters don't conclude naturally; this could reasonably be an error.
 					Ok(FutureLoop::Break(()))
@@ -759,8 +749,7 @@ where
 					// some command issued internally.
 					handle_voter_command(command, voter_commands_rx)
 				}
-			}
-		})
+			})
 	});
 
 	let voter_work = voter_work.map(|_| ()).map_err(|e| {

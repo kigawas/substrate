@@ -3,12 +3,13 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-use client::decl_runtime_apis;
 use hbbft::{
 	crypto::{PublicKey as HBPublicKey, SecretKey, Signature, PK_SIZE},
 	sync_key_gen::{Ack, AckOutcome, Part, PartOutcome, SyncKeyGen},
 };
-use parity_codec::{Codec, Decode, Encode, Input};
+
+use client::decl_runtime_apis;
+use codec::{Codec, Decode, Encode, Error as CodecError, Input};
 use rstd::vec::Vec;
 #[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
@@ -35,11 +36,11 @@ impl Encode for PublicKey {
 
 #[cfg(feature = "std")]
 impl Decode for PublicKey {
-	fn decode<I: Input>(input: &mut I) -> Option<Self> {
+	fn decode<I: Input>(input: &mut I) -> Result<Self, CodecError> {
 		let input_bytes = Decode::decode(input)?;
 		match HBPublicKey::from_bytes(&input_bytes) {
-			Ok(p) => Some(PublicKey(p)),
-			Err(e) => None,
+			Ok(p) => Ok(PublicKey(p)),
+			Err(_) => Err(CodecError::from("Decode public key error")),
 		}
 	}
 }

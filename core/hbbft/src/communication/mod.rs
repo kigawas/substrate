@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
+use codec::{Decode, Encode};
 use futures::prelude::*;
 use futures::sync::{mpsc, oneshot};
 use gossip::{GossipMessage, GossipValidator};
@@ -10,7 +11,6 @@ use hbbft::{
 use hbbft_primitives::{AuthorityId, Keypair};
 use network::{consensus_gossip as network_gossip, NetworkService};
 use network_gossip::ConsensusMessage;
-use parity_codec::{Decode, Encode};
 use runtime_primitives::traits::{
 	Block as BlockT, DigestFor, Hash as HashT, Header as HeaderT, NumberFor, ProvideRuntimeApi,
 };
@@ -217,7 +217,12 @@ impl<B: BlockT, N: Network<B>> NetworkBridge<B, N> {
 		service.register_validator(validator.clone());
 
 		let topic = global_topic::<B>(1);
-		service.register_gossip_message(topic, vec![0u8, 1u8]);
+		let message = SignedMessage::<B> {
+			data: 1,
+			sig: 1,
+			_phantom: PhantomData,
+		};
+		service.register_gossip_message(topic, message.encode());
 
 		Self { service, validator }
 	}
@@ -234,14 +239,14 @@ impl<B: BlockT, N: Network<B>> NetworkBridge<B, N> {
 			.service
 			.messages_for(topic)
 			.filter_map(|notification| {
-				let decoded = GossipMessage::<B>::decode(&mut &notification.message[..]);
-				decoded
+				let decoded = SignedMessage::<B>::decode(&mut &notification.message[..]);
+				println!("messages for {:?} {:?}", notification, decoded);
+				decoded.ok()
 			})
-			.and_then(move |msg| match msg {
-				GossipMessage::Message(msg) => {
-					println!("gossip msg: {:?}", msg);
-
-					Ok(Some(msg))
+			.and_then(move |msg| {
+				println!("incoming message: {:?}", msg);
+				match msg {
+					_ => Ok(Some(msg)),
 				}
 			})
 			.filter_map(|x| x)

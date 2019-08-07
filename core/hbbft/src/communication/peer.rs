@@ -1,3 +1,4 @@
+use codec::{Decode, Encode, Input, Error as CodecError};
 use hbbft::{
 	sync_key_gen::{Ack, AckOutcome, Part, PartOutcome, SyncKeyGen},
 	Contribution, NodeIdT,
@@ -6,7 +7,6 @@ use hbbft_primitives::PublicKey;
 use log::{debug, error, trace, warn};
 use multihash::Multihash as PkHash;
 use network::config::Roles;
-use parity_codec::{Decode, Encode, Input};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::{min, Ordering};
@@ -56,9 +56,9 @@ impl Encode for PeerId {
 }
 
 impl Decode for PeerId {
-	fn decode<I: Input>(value: &mut I) -> Option<Self> {
-		let bytes = Decode::decode(value).unwrap();
-		Some(Self(PkHash::from_bytes(bytes).unwrap()))
+	fn decode<I: Input>(value: &mut I) -> Result<Self, CodecError> {
+		let bytes = Decode::decode(value)?;
+		Ok(Self(PkHash::from_bytes(bytes).unwrap()))
 	}
 }
 
