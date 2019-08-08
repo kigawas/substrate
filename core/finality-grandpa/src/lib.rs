@@ -58,12 +58,13 @@ use client::{
 };
 use codec::Encode;
 use consensus_common::SelectChain;
-use fg_primitives::GrandpaApi;
+use fg_primitives::{AuthorityPair, GrandpaApi};
 use futures::prelude::*;
 use futures::sync::mpsc;
 use inherents::InherentDataProviders;
+use keystore::KeyStorePtr;
 use log::{debug, info, warn};
-use primitives::{ed25519, Blake2Hasher, Pair, H256};
+use primitives::{Blake2Hasher, H256};
 use serde_json;
 use sr_primitives::generic::BlockId;
 use sr_primitives::traits::{Block as BlockT, DigestFor, NumberFor, ProvideRuntimeApi};
@@ -186,10 +187,10 @@ pub struct Config {
 	/// at least every justification_period blocks. There are some other events which might cause
 	/// justification generation.
 	pub justification_period: u32,
-	/// The local signing key.
-	pub local_key: Option<Arc<ed25519::Pair>>,
 	/// Some local identifier of the voter.
 	pub name: Option<String>,
+	/// The keystore that manages the keys of this node.
+	pub keystore: Option<keystore::KeyStorePtr>,
 }
 
 impl Config {
@@ -392,11 +393,11 @@ where
 }
 
 fn global_communication<Block: BlockT<Hash = H256>, B, E, N, RA>(
-	local_key: Option<&Arc<ed25519::Pair>>,
 	set_id: u64,
 	voters: &Arc<VoterSet<AuthorityId>>,
 	client: &Arc<Client<B, E, Block, RA>>,
 	network: &NetworkBridge<Block, N>,
+	keystore: &Option<KeyStorePtr>,
 ) -> (
 	impl Stream<Item = CommunicationInH<Block, H256>, Error = CommandOrError<H256, NumberFor<Block>>>,
 	impl Sink<
@@ -411,9 +412,7 @@ where
 	RA: Send + Sync,
 	NumberFor<Block>: BlockNumberOps,
 {
-	let is_voter = local_key
-		.map(|pair| voters.contains_key(&pair.public().into()))
-		.unwrap_or(false);
+	let is_voter = is_voter(voters, keystore).is_some();
 
 	// verification stream
 	let (global_in, global_out) =
@@ -481,7 +480,7 @@ pub struct GrandpaParams<B, E, Block: BlockT<Hash = H256>, N, RA, SC, X> {
 /// block import worker that has already been instantiated with `block_import`.
 pub fn run_grandpa_voter<B, E, Block: BlockT<Hash = H256>, N, RA, SC, X>(
 	grandpa_params: GrandpaParams<B, E, Block, N, RA, SC, X>,
-) -> ::client::error::Result<impl Future<Item = (), Error = ()> + Send + 'static>
+) -> client::error::Result<impl Future<Item = (), Error = ()> + Send + 'static>
 where
 	Block::Hash: Ord,
 	B: Backend<Block, Blake2Hasher> + 'static,
@@ -560,38 +559,6 @@ where
 		voter_set_state: set_state.clone(),
 	});
 
-	initial_environment
-		.update_voter_set_state(|voter_set_state| {
-			match voter_set_state {
-				VoterSetState::Live {
-					current_round: HasVoted::Yes(id, _),
-					completed_rounds,
-				} => {
-					let local_id = config.local_key.clone().map(|pair| pair.public());
-					let has_voted = match local_id {
-						Some(local_id) => {
-							if *id == local_id {
-								// keep the previous votes
-								return Ok(None);
-							} else {
-								HasVoted::No
-							}
-						}
-						_ => HasVoted::No,
-					};
-
-					// NOTE: only updated on disk when the voter first
-					// proposes/prevotes/precommits or completes a round.
-					Ok(Some(VoterSetState::Live {
-						current_round: has_voted,
-						completed_rounds: completed_rounds.clone(),
-					}))
-				}
-				_ => Ok(None),
-			}
-		})
-		.expect("operation inside closure cannot fail; qed");
-
 	let initial_state = (initial_environment, voter_commands_rx.into_future());
 	let voter_work = future::loop_fn(initial_state, move |params| {
 		let (env, voter_commands_rx) = params;
@@ -612,20 +579,18 @@ where
 				);
 
 				let global_comms = global_communication(
-					config.local_key.as_ref(),
 					env.set_id,
 					&env.voters,
 					&client,
 					&network,
+					&config.keystore,
 				);
-
-				let voters = (*env.voters).clone();
 
 				let last_completed_round = completed_rounds.last();
 
 				Some(voter::Voter::new(
 					env.clone(),
-					voters,
+					(*env.voters).clone(),
 					global_comms,
 					last_completed_round.number,
 					last_completed_round.state.clone(),
@@ -785,4 +750,20 @@ where
 	X: Future<Item = (), Error = ()> + Clone + Send + 'static,
 {
 	run_grandpa_voter(grandpa_params)
+}
+
+/// Checks if this node is a voter in the given voter set.
+///
+/// Returns the key pair of the node that is being used in the current voter set or `None`.
+fn is_voter(
+	voters: &Arc<VoterSet<AuthorityId>>,
+	keystore: &Option<KeyStorePtr>,
+) -> Option<AuthorityPair> {
+	match keystore {
+		Some(keystore) => voters
+			.voters()
+			.iter()
+			.find_map(|(p, _)| keystore.read().key_pair::<AuthorityPair>(&p).ok()),
+		None => None,
+	}
 }
