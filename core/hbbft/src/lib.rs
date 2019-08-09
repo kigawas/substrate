@@ -33,7 +33,10 @@ pub use communication::Network;
 mod tests;
 
 mod communication;
-use communication::{gossip::GossipMessage, Message, SignedMessage};
+mod periodic_stream;
+
+use communication::{gossip::GossipMessage, Message, NetworkBridge, SignedMessage};
+use periodic_stream::PeriodicStream;
 
 #[derive(Clone)]
 pub struct NodeConfig {
@@ -50,81 +53,30 @@ impl NodeConfig {
 	}
 }
 
-struct Worker<Block: BlockT, S, M> {
-	incoming: Fuse<S>,
-	check_pending: Interval,
-	ready: VecDeque<M>,
-	_phantom: PhantomData<Block>,
-}
-
-impl<Block, S, M> Worker<Block, S, M>
+fn global_comm<Block, N>(
+	bridge: &NetworkBridge<Block, N>,
+) -> (
+	impl Stream<Item = SignedMessage<Block>, Error = ClientError>,
+	impl Sink<SinkItem = Message<Block>, SinkError = ClientError>,
+)
 where
-	Block: BlockT,
-	S: Stream<Item = M, Error = communication::Error>,
-	M: Debug,
+	Block: BlockT<Hash = H256>,
+	N: Network<Block>,
 {
-	pub fn new(stream: S) -> Self {
-		let now = Instant::now();
-		let dur = Duration::from_secs(5);
-		let check_pending = Interval::new(now + dur, dur);
+	let (global_in, global_out) = bridge.global();
+	let global_in = PeriodicStream::<Block, _, SignedMessage<Block>>::new(global_in);
 
-		Self {
-			incoming: stream.fuse(),
-			check_pending,
-			ready: VecDeque::new(),
-			_phantom: PhantomData,
-		}
-	}
+	let global_in = global_in.map_err(|_| ClientError::Msg("error global in".to_string()));
+	let global_out = global_out.sink_map_err(|_| ClientError::Msg("error global out".to_string()));
+
+	(global_in, global_out)
 }
 
-impl<Block, S, M> Stream for Worker<Block, S, M>
-where
-	Block: BlockT,
-	S: Stream<Item = M, Error = communication::Error>,
-	M: Debug,
-{
-	type Item = M;
-	type Error = communication::Error;
-
-	fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-		loop {
-			match self.incoming.poll()? {
-				Async::Ready(None) => return Ok(Async::Ready(None)),
-				Async::Ready(Some(input)) => {
-					println!("worker poll {:?}", input);
-					let ready = &mut self.ready;
-					ready.push_back(input);
-				}
-				Async::NotReady => break,
-			}
-		}
-
-		while let Async::Ready(Some(p)) = self
-			.check_pending
-			.poll()
-			.map_err(|e| communication::Error::Network("pending err".to_string()))?
-		{
-			println!("Check pending {:?}", p);
-		}
-
-		if let Some(ready) = self.ready.pop_front() {
-			return Ok(Async::Ready(Some(ready)));
-		}
-
-		if self.incoming.is_done() {
-			println!("worker incoming done");
-			Ok(Async::Ready(None))
-		} else {
-			println!("worker incoming not ready");
-			Ok(Async::NotReady)
-		}
-	}
-}
-
-pub fn run_key_gen<Block: BlockT<Hash = H256>, N>(
+pub fn run_key_gen<Block, N>(
 	network: N,
 ) -> Result<impl Future<Item = (), Error = ()> + Send + 'static>
 where
+	Block: BlockT<Hash = H256>,
 	Block::Hash: Ord,
 	N: Network<Block> + Send + Sync + 'static,
 	N::In: Send + 'static,
@@ -133,14 +85,11 @@ where
 		local_key: None,
 		name: None,
 	};
-	let bridge = communication::NetworkBridge::new(network, config.clone());
+	let bridge = NetworkBridge::new(network, config.clone());
 	let initial_state = 1;
 
 	let key_gen_work = futures::future::loop_fn(initial_state, move |params| {
-		let (mut incoming, mut outgoing) = bridge.global();
-
-		let mut incoming = Worker::<Block, _, SignedMessage<Block>>::new(incoming);
-		let mut incoming = incoming.map_err(|_| ClientError::Msg("error when polling".to_string()));
+		let (mut incoming, mut outgoing) = global_comm(&bridge);
 
 		let poll_voter = futures::future::poll_fn(move || -> Result<_> {
 			println!("in poll_fn");
