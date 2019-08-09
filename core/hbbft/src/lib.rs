@@ -33,7 +33,7 @@ pub use communication::Network;
 mod tests;
 
 mod communication;
-use communication::{gossip::GossipMessage, SignedMessage};
+use communication::{gossip::GossipMessage, Message, SignedMessage};
 
 #[derive(Clone)]
 pub struct NodeConfig {
@@ -137,7 +137,7 @@ where
 	let initial_state = 1;
 
 	let key_gen_work = futures::future::loop_fn(initial_state, move |params| {
-		let (mut incoming, outgoing) = bridge.global();
+		let (mut incoming, mut outgoing) = bridge.global();
 
 		let mut incoming = Worker::<Block, _, SignedMessage<Block>>::new(incoming);
 		let mut incoming = incoming.map_err(|_| ClientError::Msg("error when polling".to_string()));
@@ -149,6 +149,11 @@ where
 				Ok(r) => match r {
 					Async::Ready(Some(item)) => {
 						println!("incoming polling ready {:?}", item);
+						// let message = Message {
+						// 	data: 100,
+						// 	_phantom: PhantomData,
+						// };
+						// outgoing.start_send(message);
 						return Ok(Async::Ready(Some(item)));
 					}
 					Async::Ready(None) => {

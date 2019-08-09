@@ -20,6 +20,8 @@ use std::path::PathBuf;
 use structopt::{StructOpt, clap::{arg_enum, _clap_count_exprs, App, AppSettings, SubCommand, Arg}};
 use client;
 
+pub use crate::execution_strategy::ExecutionStrategy;
+
 /// Auxiliary macro to implement `GetLogFilter` for all types that have the `shared_params` field.
 macro_rules! impl_get_log_filter {
 	( $type:ident ) => {
@@ -28,22 +30,6 @@ macro_rules! impl_get_log_filter {
 				self.shared_params.get_log_filter()
 			}
 		}
-	}
-}
-
-arg_enum! {
-	/// How to execute blocks
-	#[allow(missing_docs)]
-	#[derive(Debug, Clone, Copy)]
-	pub enum ExecutionStrategy {
-		// Execute with native build (if available, WebAssembly otherwise).
-		Native,
-		// Only execute with the WebAssembly build.
-		Wasm,
-		// Execute with both native (where available) and WebAssembly builds.
-		Both,
-		// Execute with the native build if possible; if it fails, then execute with WebAssembly.
-		NativeElseWasm,
 	}
 }
 
@@ -311,18 +297,9 @@ pub struct ExecutionStrategies {
 /// The `run` command used to run a node.
 #[derive(Debug, StructOpt, Clone)]
 pub struct RunCmd {
-	/// Enable validator mode
-	#[structopt(long = "validator")]
-	pub validator: bool,
-
 	/// Disable GRANDPA when running in validator mode
 	#[structopt(long = "no-grandpa")]
 	pub no_grandpa: bool,
-
-	/// Run GRANDPA voter even when no additional key seed via `--key` is specified. This can for example be of interest
-	/// when running a sentry node in front of a validator, thus needing to forward GRANDPA gossip messages.
-	#[structopt(long = "grandpa-voter")]
-	pub grandpa_voter: bool,
 
 	/// Experimental: Run in light client mode
 	#[structopt(long = "light")]
@@ -505,7 +482,6 @@ impl AugmentClap for Keyring {
 					.long(&a.name)
 					.help(&a.help)
 					.conflicts_with_all(&conflicts_with_strs)
-					.requires("dev")
 					.takes_value(false)
 			)
 		})

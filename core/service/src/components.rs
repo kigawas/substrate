@@ -36,7 +36,7 @@ use crate::config::Configuration;
 use primitives::{Blake2Hasher, H256, traits::BareCryptoStorePtr};
 use rpc::{self, apis::system::SystemInfo};
 use futures::{prelude::*, future::Executor};
-use futures03::channel::mpsc;
+use futures03::{FutureExt as _, channel::mpsc, compat::Compat};
 
 // Type aliases.
 // These exist mainly to avoid typing `<F as Factory>::Foo` all over the code.
@@ -156,13 +156,13 @@ pub trait InitialSessionKeys<C: Components> {
 
 impl<C: Components> InitialSessionKeys<Self> for C where
 	ComponentClient<C>: ProvideRuntimeApi,
-	<ComponentClient<C> as ProvideRuntimeApi>::Api: substrate_session::SessionKeys<ComponentBlock<C>>,
+	<ComponentClient<C> as ProvideRuntimeApi>::Api: session::SessionKeys<ComponentBlock<C>>,
 {
 	fn generate_intial_session_keys(
 		client: Arc<ComponentClient<C>>,
 		seeds: Vec<String>,
 	) -> error::Result<()> {
-		substrate_session::generate_initial_session_keys(client, seeds).map_err(Into::into)
+		session::generate_initial_session_keys(client, seeds).map_err(Into::into)
 	}
 }
 
@@ -180,7 +180,8 @@ pub trait StartRPC<C: Components> {
 
 impl<C: Components> StartRPC<Self> for C where
 	ComponentClient<C>: ProvideRuntimeApi,
-	<ComponentClient<C> as ProvideRuntimeApi>::Api: runtime_api::Metadata<ComponentBlock<C>>,
+	<ComponentClient<C> as ProvideRuntimeApi>::Api:
+		runtime_api::Metadata<ComponentBlock<C>> + session::SessionKeys<ComponentBlock<C>>,
 {
 	fn start_rpc(
 		client: Arc<ComponentClient<C>>,
@@ -193,7 +194,12 @@ impl<C: Components> StartRPC<Self> for C where
 		let subscriptions = rpc::apis::Subscriptions::new(task_executor.clone());
 		let chain = rpc::apis::chain::Chain::new(client.clone(), subscriptions.clone());
 		let state = rpc::apis::state::State::new(client.clone(), subscriptions.clone());
-		let author = rpc::apis::author::Author::new(client, transaction_pool, subscriptions, keystore);
+		let author = rpc::apis::author::Author::new(
+			client,
+			transaction_pool,
+			subscriptions,
+			keystore,
+		);
 		let system = rpc::apis::system::System::new(rpc_system_info, system_send_back);
 		rpc::rpc_handler::<ComponentBlock<C>, ComponentExHash<C>, _, _, _, _>(
 			state,
@@ -279,7 +285,9 @@ impl<C: Components> OffchainWorker<Self> for C where
 		pool: &Arc<TransactionPool<C::TransactionPoolApi>>,
 		network_state: &Arc<dyn NetworkStateInfo + Send + Sync>,
 	) -> error::Result<Box<dyn Future<Item = (), Error = ()> + Send>> {
-		Ok(Box::new(offchain.on_block_imported(number, pool, network_state.clone())))
+		let future = offchain.on_block_imported(number, pool, network_state.clone())
+			.map(|()| Ok(()));
+		Ok(Box::new(Compat::new(future)))
 	}
 }
 
@@ -498,6 +506,16 @@ impl<Factory: ServiceFactory> Future for FullComponents<Factory> {
 	}
 }
 
+impl<Factory: ServiceFactory> Executor<Box<dyn Future<Item = (), Error = ()> + Send>>
+for FullComponents<Factory> {
+	fn execute(
+		&self,
+		future: Box<dyn Future<Item = (), Error = ()> + Send>
+	) -> Result<(), futures::future::ExecuteError<Box<dyn Future<Item = (), Error = ()> + Send>>> {
+		self.service.execute(future)
+	}
+}
+
 impl<Factory: ServiceFactory> Components for FullComponents<Factory> {
 	type Factory = Factory;
 	type Executor = FullExecutor<Factory>;
@@ -598,12 +616,28 @@ impl<Factory: ServiceFactory> Deref for LightComponents<Factory> {
 	}
 }
 
+impl<Factory: ServiceFactory> DerefMut for LightComponents<Factory> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.service
+	}
+}
+
 impl<Factory: ServiceFactory> Future for LightComponents<Factory> {
 	type Item = ();
 	type Error = ();
 
 	fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
 		self.service.poll()
+	}
+}
+
+impl<Factory: ServiceFactory> Executor<Box<dyn Future<Item = (), Error = ()> + Send>>
+for LightComponents<Factory> {
+	fn execute(
+		&self,
+		future: Box<dyn Future<Item = (), Error = ()> + Send>
+	) -> Result<(), futures::future::ExecuteError<Box<dyn Future<Item = (), Error = ()> + Send>>> {
+		self.service.execute(future)
 	}
 }
 

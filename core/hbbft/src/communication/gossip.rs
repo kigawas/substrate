@@ -136,10 +136,11 @@ impl<Block: BlockT> network_gossip::Validator<Block> for GossipValidator<Block> 
 		let inner = self.inner.read();
 		Box::new(move |topic, mut data| {
 			println!("message_expired {:?}", data);
-			match *inner {
-				1 => false,
-				_ => true,
-			}
+			// match *inner {
+			// 	1 => false,
+			// 	_ => true,
+			// }
+			true
 		})
 	}
 }

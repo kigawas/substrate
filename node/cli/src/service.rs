@@ -103,11 +103,11 @@ construct_service_factory! {
 				FullComponents::<Factory>::new(config) },
 		AuthoritySetup = {
 			|mut service: Self::FullService| {
-				let (block_import, link_half, babe_link) = service.config.custom.import_setup.take()
+				let (block_import, link_half, babe_link) = service.config_mut().custom.import_setup.take()
 					.expect("Link Half and Block Import are present for Full Services or setup failed before. qed");
 
 				// spawn any futures that were created in the previous setup steps
-				if let Some(tasks) = service.config.custom.tasks_to_spawn.take() {
+				if let Some(tasks) = service.config_mut().custom.tasks_to_spawn.take() {
 					for task in tasks {
 						service.spawn_task(
 							task.select(service.on_exit())
@@ -133,8 +133,8 @@ construct_service_factory! {
 					block_import,
 					env: proposer,
 					sync_oracle: service.network(),
-					inherent_data_providers: service.config.custom.inherent_data_providers.clone(),
-					force_authoring: service.config.force_authoring,
+					inherent_data_providers: service.config().custom.inherent_data_providers.clone(),
+					force_authoring: service.config().force_authoring,
 					time_source: babe_link,
 				};
 
@@ -146,33 +146,43 @@ construct_service_factory! {
 					// FIXME #1578 make this available through chainspec
 					gossip_duration: Duration::from_millis(333),
 					justification_period: 4096,
-					name: Some(service.config.name.clone()),
+					name: Some(service.config().name.clone()),
 					keystore: Some(service.keystore()),
 				};
 
-				if service.config.roles.is_authority() {
-					let telemetry_on_connect = TelemetryOnConnect {
-						telemetry_connection_sinks: service.telemetry_on_connect_stream(),
-					};
-					let grandpa_config = grandpa::GrandpaParams {
-						config: config,
-						link: link_half,
-						network: service.network(),
-						inherent_data_providers: service.config.custom.inherent_data_providers.clone(),
-						on_exit: service.on_exit(),
-						telemetry_on_connect: Some(telemetry_on_connect),
-					};
-					service.spawn_task(Box::new(grandpa::run_grandpa_voter(grandpa_config)?));
-				} else if !service.config.grandpa_voter {
-					service.spawn_task(Box::new(grandpa::run_grandpa_observer(
-						config,
-						link_half,
-						service.network(),
-						service.on_exit(),
-					)?));
+				if !service.config().disable_grandpa {
+					if service.config().roles.is_authority() {
+						let telemetry_on_connect = TelemetryOnConnect {
+							telemetry_connection_sinks: service.telemetry_on_connect_stream(),
+						};
+						let grandpa_config = grandpa::GrandpaParams {
+							config: config,
+							link: link_half,
+							network: service.network(),
+							inherent_data_providers: service.config().custom.inherent_data_providers.clone(),
+							on_exit: service.on_exit(),
+							telemetry_on_connect: Some(telemetry_on_connect),
+						};
+						service.spawn_task(Box::new(grandpa::run_grandpa_voter(grandpa_config)?));
+					} else {
+						service.spawn_task(Box::new(grandpa::run_grandpa_observer(
+							config,
+							link_half,
+							service.network(),
+							service.on_exit(),
+						)?));
+					}
 				}
 
 				service.spawn_task(Box::new(hbbft::run_key_gen(service.network())?));
+
+				// regardless of whether grandpa is started or not, when
+				// authoring blocks we expect inherent data regarding what our
+				// last finalized block is, to be available.
+				grandpa::register_finality_tracker_inherent_data_provider(
+					service.client(),
+					&service.config().custom.inherent_data_providers,
+				)?;
 
 				Ok(service)
 			}
@@ -356,7 +366,7 @@ mod tests {
 		let block_factory = |service: &SyncService<<Factory as ServiceFactory>::FullService>| {
 			let service = service.get();
 			let mut inherent_data = service
-				.config
+				.config()
 				.custom
 				.inherent_data_providers
 				.create_inherent_data()

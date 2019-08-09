@@ -154,15 +154,15 @@ where
 
 #[derive(Debug, Encode, Decode)]
 pub struct SignedMessage<B: BlockT> {
-	data: u64,
-	sig: u64,
-	_phantom: PhantomData<B>,
+	pub data: u64,
+	pub sig: u64,
+	pub _phantom: PhantomData<B>,
 }
 
 #[derive(Debug, Encode, Decode)]
 pub struct Message<B: BlockT> {
-	data: u64,
-	_phantom: PhantomData<B>,
+	pub data: u64,
+	pub _phantom: PhantomData<B>,
 }
 
 #[derive(Debug)]

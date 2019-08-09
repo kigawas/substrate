@@ -73,7 +73,7 @@ use substrate_telemetry::{telemetry, CONSENSUS_DEBUG, CONSENSUS_INFO, CONSENSUS_
 use srml_finality_tracker;
 
 use grandpa::Error as GrandpaError;
-use grandpa::{round::State as RoundState, voter, voter_set::VoterSet, BlockNumberOps};
+use grandpa::{voter, voter_set::VoterSet, BlockNumberOps};
 
 use std::fmt;
 use std::sync::Arc;
@@ -104,9 +104,7 @@ pub use service_integration::{
 
 use aux_schema::PersistentData;
 use communication::NetworkBridge;
-use environment::{
-	CompletedRound, CompletedRounds, Environment, HasVoted, SharedVoterSetState, VoterSetState,
-};
+use environment::{Environment, SharedVoterSetState, VoterSetState};
 use fg_primitives::AuthoritySignature;
 use import::GrandpaBlockImport;
 use service::TelemetryOnConnect;
@@ -433,7 +431,7 @@ where
 
 /// Register the finality tracker inherent data provider (which is used by
 /// GRANDPA), if not registered already.
-fn register_finality_tracker_inherent_data_provider<B, E, Block: BlockT<Hash = H256>, RA>(
+pub fn register_finality_tracker_inherent_data_provider<B, E, Block: BlockT<Hash = H256>, RA>(
 	client: Arc<Client<B, E, Block, RA>>,
 	inherent_data_providers: &InherentDataProviders,
 ) -> Result<(), consensus_common::Error>
@@ -630,22 +628,11 @@ where
 
 					// start the new authority set using the block where the
 					// set changed (not where the signal happened!) as the base.
-					let genesis_state = RoundState::genesis((new.canon_hash, new.canon_number));
-
-					let set_state = VoterSetState::Live {
-						// always start at round 0 when changing sets.
-						completed_rounds: CompletedRounds::new(
-							CompletedRound {
-								number: 0,
-								state: genesis_state,
-								base: (new.canon_hash, new.canon_number),
-								votes: Vec::new(),
-							},
-							new.set_id,
-							&*authority_set.inner().read(),
-						),
-						current_round: HasVoted::No,
-					};
+					let set_state = VoterSetState::live(
+						new.set_id,
+						&*authority_set.inner().read(),
+						(new.canon_hash, new.canon_number),
+					);
 
 					#[allow(deprecated)]
 					aux_schema::write_voter_set_state(&**client.backend(), &set_state)?;
