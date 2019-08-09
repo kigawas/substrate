@@ -18,6 +18,7 @@ use runtime_primitives::traits::{
 pub use hbbft_primitives::HBBFT_ENGINE_ID;
 
 pub mod gossip;
+mod message;
 mod peer;
 
 pub struct NetworkStream {

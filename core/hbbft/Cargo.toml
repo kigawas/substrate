@@ -21,7 +21,7 @@ consensus_common = { package = "substrate-consensus-common", path = "../consensu
 substrate-primitives = { path = "../primitives" }
 substrate-telemetry = { path = "../telemetry" }
 serde = "1.0"
-serde_json = "1.0"
+bincode = "1.1"
 client = { package = "substrate-client", path = "../client" }
 inherents = { package = "substrate-inherents", path = "../../core/inherents" }
 network = { package = "substrate-network", path = "../network" }

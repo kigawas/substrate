@@ -21,7 +21,6 @@ use log::{debug, info, warn};
 use network;
 use runtime_primitives::generic::BlockId;
 use runtime_primitives::traits::{Block as BlockT, DigestFor, NumberFor, ProvideRuntimeApi};
-use serde_json;
 use substrate_primitives::H256;
 use substrate_telemetry::{telemetry, CONSENSUS_DEBUG, CONSENSUS_INFO, CONSENSUS_WARN};
 use tokio_executor::DefaultExecutor;
