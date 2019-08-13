@@ -145,10 +145,11 @@ pub type PoolApi<C> = <C as Components>::TransactionPoolApi;
 pub trait RuntimeGenesis: Serialize + DeserializeOwned + BuildStorage {}
 impl<T: Serialize + DeserializeOwned + BuildStorage> RuntimeGenesis for T {}
 
-/// Something that can create initial session keys from given seeds.
+/// Something that can create and store initial session keys from given seeds.
 pub trait InitialSessionKeys<C: Components> {
-	/// Generate the initial session keys for the given seeds.
-	fn generate_intial_session_keys(
+	/// Generate the initial session keys for the given seeds and store them in
+	/// an internal keystore.
+	fn generate_initial_session_keys(
 		client: Arc<ComponentClient<C>>,
 		seeds: Vec<String>,
 	) -> error::Result<()>;
@@ -158,7 +159,7 @@ impl<C: Components> InitialSessionKeys<Self> for C where
 	ComponentClient<C>: ProvideRuntimeApi,
 	<ComponentClient<C> as ProvideRuntimeApi>::Api: session::SessionKeys<ComponentBlock<C>>,
 {
-	fn generate_intial_session_keys(
+	fn generate_initial_session_keys(
 		client: Arc<ComponentClient<C>>,
 		seeds: Vec<String>,
 	) -> error::Result<()> {
@@ -268,6 +269,7 @@ pub trait OffchainWorker<C: Components> {
 		>,
 		pool: &Arc<TransactionPool<C::TransactionPoolApi>>,
 		network_state: &Arc<dyn NetworkStateInfo + Send + Sync>,
+		is_validator: bool,
 	) -> error::Result<Box<dyn Future<Item = (), Error = ()> + Send>>;
 }
 
@@ -284,8 +286,9 @@ impl<C: Components> OffchainWorker<Self> for C where
 		>,
 		pool: &Arc<TransactionPool<C::TransactionPoolApi>>,
 		network_state: &Arc<dyn NetworkStateInfo + Send + Sync>,
+		is_validator: bool,
 	) -> error::Result<Box<dyn Future<Item = (), Error = ()> + Send>> {
-		let future = offchain.on_block_imported(number, pool, network_state.clone())
+		let future = offchain.on_block_imported(number, pool, network_state.clone(), is_validator)
 			.map(|()| Ok(()));
 		Ok(Box::new(Compat::new(future)))
 	}
@@ -499,7 +502,7 @@ impl<Factory: ServiceFactory> DerefMut for FullComponents<Factory> {
 
 impl<Factory: ServiceFactory> Future for FullComponents<Factory> {
 	type Item = ();
-	type Error = ();
+	type Error = super::Error;
 
 	fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
 		self.service.poll()
@@ -624,7 +627,7 @@ impl<Factory: ServiceFactory> DerefMut for LightComponents<Factory> {
 
 impl<Factory: ServiceFactory> Future for LightComponents<Factory> {
 	type Item = ();
-	type Error = ();
+	type Error = super::Error;
 
 	fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
 		self.service.poll()
