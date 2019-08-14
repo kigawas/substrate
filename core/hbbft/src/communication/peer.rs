@@ -1,33 +1,43 @@
-use codec::{Decode, Encode, Input, Error as CodecError};
+use codec::{Decode, Encode, Error as CodecError, Input};
 use hbbft::{
+	crypto::{
+		Ciphertext, PublicKey as HBPublicKey, PublicKeySet, SecretKey as HBSecretKey, Signature,
+	},
 	sync_key_gen::{Ack, AckOutcome, Part, PartOutcome, SyncKeyGen},
 	Contribution, NodeIdT,
 };
 use hbbft_primitives::PublicKey;
 use log::{debug, error, trace, warn};
 use multihash::Multihash as PkHash;
-use network::config::Roles;
+use network::{config::Roles, PeerId};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::{min, Ordering};
 use std::collections::{HashMap, VecDeque};
+use std::convert::From;
 
 #[derive(Clone, Hash, Debug, PartialEq, Eq)] // NodeIdT
-pub(crate) struct PeerId(PkHash);
+pub struct NodeId(PkHash);
 
-impl Ord for PeerId {
+impl From<PeerId> for NodeId {
+	fn from(pid: PeerId) -> Self {
+		Self(PkHash::from_bytes(pid.as_bytes().to_vec()).unwrap())
+	}
+}
+
+impl Ord for NodeId {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.0.as_bytes().cmp(other.0.as_bytes())
 	}
 }
 
-impl PartialOrd for PeerId {
+impl PartialOrd for NodeId {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
 	}
 }
 
-impl Serialize for PeerId {
+impl Serialize for NodeId {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
@@ -36,7 +46,7 @@ impl Serialize for PeerId {
 	}
 }
 
-impl<'de> Deserialize<'de> for PeerId {
+impl<'de> Deserialize<'de> for NodeId {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: Deserializer<'de>,
@@ -48,78 +58,101 @@ impl<'de> Deserialize<'de> for PeerId {
 	}
 }
 
-impl Encode for PeerId {
+impl Encode for NodeId {
 	fn encode(&self) -> Vec<u8> {
 		let bytes = self.clone().0.into_bytes();
 		Encode::encode(&bytes)
 	}
 }
 
-impl Decode for PeerId {
+impl Decode for NodeId {
 	fn decode<I: Input>(value: &mut I) -> Result<Self, CodecError> {
 		let bytes = Decode::decode(value)?;
 		Ok(Self(PkHash::from_bytes(bytes).unwrap()))
 	}
 }
 
-// unsafe impl Send for PeerId {}
-// unsafe impl Sync for PeerId {}
+// unsafe impl Send for NodeId {}
+// unsafe impl Sync for NodeId {}
 
 #[derive(Clone, Debug)]
 enum PeerPhase {
 	Handshaking,
-	PendingJoin { pk: PublicKey },
-	EstablishedObserver { pk: PublicKey },
-	EstablishedValidator { pk: PublicKey },
+	PendingJoin { nid: NodeId, pk: PublicKey },
+	EstablishedObserver { nid: NodeId, pk: PublicKey },
+	EstablishedValidator { nid: NodeId, pk: PublicKey },
 }
 
+#[derive(Debug)]
 struct PeerInfo {
 	phase: PeerPhase,
 }
 
-impl PeerInfo {
-	fn new(pk: Option<PublicKey>) -> Self {
-		let phase = match pk {
-			Some(pk) => PeerPhase::EstablishedValidator { pk },
-			None => PeerPhase::Handshaking,
-		};
+impl Default for PeerInfo {
+	fn default() -> Self {
+		Self {
+			phase: PeerPhase::Handshaking,
+		}
+	}
+}
 
-		PeerInfo { phase }
+impl PeerInfo {
+	fn new() -> Self {
+		Self::default()
 	}
 
-	fn to_pending(&mut self, pk: PublicKey) {
+	fn to_pending(&mut self, peer_info: (NodeId, PublicKey)) {
 		self.phase = match self.phase {
-			PeerPhase::Handshaking => PeerPhase::PendingJoin { pk },
+			PeerPhase::Handshaking => PeerPhase::PendingJoin {
+				nid: peer_info.0,
+				pk: peer_info.1,
+			},
 			_ => panic!("Invalid state transition on `to_pending`"),
 		}
 	}
 
 	fn to_observer(&mut self) {
 		self.phase = match self.phase {
-			PeerPhase::PendingJoin { ref pk } => PeerPhase::EstablishedObserver { pk: pk.clone() },
+			PeerPhase::PendingJoin { ref nid, ref pk } => PeerPhase::EstablishedObserver {
+				nid: nid.clone(),
+				pk: pk.clone(),
+			},
 			_ => panic!("Invalid state transition on `to_observer`"),
 		}
 	}
 
-	fn to_validator(&mut self, pk: Option<PublicKey>) {
+	fn to_validator(&mut self, peer_info: Option<(NodeId, PublicKey)>) {
 		self.phase = match self.phase {
-			PeerPhase::Handshaking => match pk {
-				Some(ref pk) => PeerPhase::EstablishedValidator { pk: pk.clone() },
+			PeerPhase::Handshaking => match peer_info {
+				Some((ref nid, ref pk)) => PeerPhase::EstablishedValidator {
+					nid: nid.clone(),
+					pk: pk.clone(),
+				},
 				None => panic!("Invalid state transition on `to_validator`"),
 			},
-			PeerPhase::EstablishedObserver { ref pk } => {
-				PeerPhase::EstablishedValidator { pk: pk.clone() }
-			}
+			PeerPhase::EstablishedObserver { ref nid, ref pk } => PeerPhase::EstablishedValidator {
+				nid: nid.clone(),
+				pk: pk.clone(),
+			},
 			_ => panic!("Invalid state transition on `to_validator`"),
+		}
+	}
+
+	pub fn node_id(&self) -> Option<&NodeId> {
+		match &self.phase {
+			PeerPhase::Handshaking => None,
+			PeerPhase::PendingJoin { ref nid, .. } => Some(nid),
+			PeerPhase::EstablishedObserver { ref nid, .. } => Some(nid),
+			PeerPhase::EstablishedValidator { ref nid, .. } => Some(nid),
 		}
 	}
 
 	pub fn public_key(&self) -> Option<&PublicKey> {
 		match &self.phase {
 			PeerPhase::Handshaking => None,
-			PeerPhase::PendingJoin { ref pk } => Some(pk),
-			PeerPhase::EstablishedObserver { ref pk } => Some(pk),
-			PeerPhase::EstablishedValidator { ref pk } => Some(pk),
+			PeerPhase::PendingJoin { ref pk, .. } => Some(pk),
+			PeerPhase::EstablishedObserver { ref pk, .. } => Some(pk),
+			PeerPhase::EstablishedValidator { ref pk, .. } => Some(pk),
 		}
 	}
 
@@ -143,8 +176,9 @@ impl PeerInfo {
 	}
 }
 
-struct Peers {
-	map: HashMap<PeerId, PeerInfo>,
+#[derive(Debug)]
+pub(crate) struct Peers {
+	map: HashMap<NodeId, PeerInfo>,
 }
 
 impl Default for Peers {
@@ -156,22 +190,36 @@ impl Default for Peers {
 }
 
 impl Peers {
-	pub fn add(&mut self, who: PeerId, pk: Option<PublicKey>) {
-		self.map.insert(who, PeerInfo::new(pk));
+	pub fn add(&mut self, who: NodeId) {
+		self.map.insert(who, PeerInfo::default());
 	}
-	pub fn del(&mut self, who: &PeerId) {
+
+	pub fn del(&mut self, who: &NodeId) {
 		self.map.remove(who);
 	}
 
-	pub fn set_validator(&mut self, who: &PeerId, pk: PublicKey) -> bool {
+	pub fn set_validator(&mut self, who: &NodeId, pk: PublicKey) -> bool {
 		// assert hash(pk) == who
+		// return true if already validator
 		let peer = self.map.get_mut(who).expect("Peer not found!");
 		match peer.is_validator() {
 			true => true,
 			false => {
-				peer.to_validator(Some(pk));
+				peer.to_validator(Some((who.clone(), pk)));
 				false
 			}
 		}
+	}
+
+	pub fn get_validator_key_map(&self) -> HashMap<NodeId, PublicKey> {
+		let validators = self.map.values().filter(|p| p.is_validator());
+		validators
+			.map(|p| {
+				(
+					p.node_id().cloned().unwrap(),
+					p.public_key().cloned().unwrap(),
+				)
+			})
+			.collect()
 	}
 }

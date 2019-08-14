@@ -40,7 +40,8 @@ use periodic_stream::PeriodicStream;
 #[derive(Clone)]
 pub struct NodeConfig {
 	pub local_key: Option<Arc<SecretKey>>,
-	name: Option<String>,
+	pub threshold: u32,
+	pub name: Option<String>,
 }
 
 impl NodeConfig {
@@ -83,6 +84,7 @@ where
 	let config = NodeConfig {
 		local_key: None,
 		name: None,
+		threshold: 3,
 	};
 	let bridge = NetworkBridge::new(network, config.clone());
 	let initial_state = 1;

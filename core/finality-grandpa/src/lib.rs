@@ -52,6 +52,7 @@
 //! or prune any signaled changes based on whether the signaling block is
 //! included in the newly-finalized chain.
 
+use client::blockchain::HeaderBackend;
 use client::{
 	backend::Backend, error::Error as ClientError, BlockchainEvents, CallExecutor, Client,
 };
@@ -59,13 +60,10 @@ use codec::Encode;
 use consensus_common::SelectChain;
 use fg_primitives::{AuthorityPair, GrandpaApi};
 use futures::prelude::*;
-use futures::prelude::*;
-use futures::sync::mpsc;
 use futures::sync::mpsc;
 use inherents::InherentDataProviders;
 use keystore::KeyStorePtr;
 use log::{debug, error, info};
-use log::{debug, info, warn};
 use primitives::{Blake2Hasher, H256};
 use serde_json;
 use sr_primitives::generic::BlockId;

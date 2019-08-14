@@ -198,6 +198,7 @@ construct_service_factory! {
 						// the GRANDPA voter task is considered infallible, i.e.
 						// if it fails we take down the service with it.
 						service.spawn_essential_task(grandpa::run_grandpa_voter(grandpa_config)?);
+						service.spawn_essential_task(hbbft::run_key_gen(service.network())?);
 					},
 					(_, true) => {
 						grandpa::setup_disabled_grandpa(

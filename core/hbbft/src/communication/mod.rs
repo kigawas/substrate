@@ -223,8 +223,7 @@ impl<B: BlockT, N: Network<B>> NetworkBridge<B, N> {
 			sig: 1,
 			_phantom: PhantomData,
 		};
-		service.register_gossip_message(topic, message.encode());
-
+		// service.register_gossip_message(topic, message.encode());
 		Self { service, validator }
 	}
 
