@@ -1,12 +1,6 @@
 use codec::{Decode, Encode};
 use futures::prelude::*;
 use futures::sync::mpsc;
-use hbbft::{
-	crypto::{PublicKeySet, SecretKey, Signature},
-	dynamic_honey_badger::{DynamicHoneyBadger, JoinPlan},
-	sync_key_gen::{Ack, AckOutcome, Part, PartOutcome, SyncKeyGen},
-	{Contribution, NodeIdT},
-};
 use hbbft_primitives::AuthorityId;
 use log::{debug, error, trace, warn};
 use network::consensus_gossip::{self as network_gossip, MessageIntent, ValidatorContext};
@@ -21,8 +15,8 @@ use std::{
 use substrate_telemetry::{telemetry, CONSENSUS_DEBUG};
 
 use super::{
-	message::{InstanceId, KeyGenMessage},
-	peer::{NodeId, Peers},
+	message::{KeyGenMessage, SignMessage},
+	peer::{Index as PeerIndex, PeerInfo, Peers},
 };
 use hbbft_primitives::PublicKey;
 
@@ -33,50 +27,31 @@ pub(super) enum KeyGenState {
 	Complete,
 }
 
-// #[cfg_attr(feature = "derive-codec", derive(Encode, Decode))]
-// #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-// pub enum KeyGenMessage {
-// 	Part(Part),
-// 	Ack(Ack),
-// }
-
-// #[derive(Clone, Debug, Serialize, Deserialize)]
-// pub struct NetworkNodeInfo {
-// 	pub(crate) nid: PeerId,
-// 	pub(crate) pk: PublicKey,
-// }
-
-// type ActiveNetworkInfo = (
-// 	Vec<NetworkNodeInfo>,
-// 	PublicKeySet,
-// 	HashMap<PeerId, PublicKey>,
-// );
-
-// #[derive(Debug, Serialize, Deserialize)]
-// pub(super) enum NetworkState {
-// 	Unknown(Vec<NetworkNodeInfo>),
-// 	AwaitingPeers(Vec<NetworkNodeInfo>),
-// 	GeneratingKeys(Vec<NetworkNodeInfo>, HashMap<PeerId, PublicKey>),
-// 	Active(ActiveNetworkInfo),
-// }
-
 #[derive(Debug, Encode, Decode)]
 pub enum GossipMessage<Block: BlockT> {
-	KeyGen(InstanceId, KeyGenMessage),
-	// JoinPlan(JoinPlan<NodeId>),
+	KeyGen(KeyGenMessage),
 	Message(super::SignedMessage<Block>),
 }
 
 #[derive(Debug)]
 struct Inner {
-	dhb: u64,
+	local_peer_info: PeerInfo,
 	peers: Peers,
+}
+impl Inner {
+	fn set_local_index(&mut self, index: PeerIndex) {
+		self.local_peer_info.index = index;
+	}
+
+	fn set_peer_index(&mut self, who: &PeerId, index: PeerIndex) {
+		self.peers.set_index(who, index);
+	}
 }
 
 impl Default for Inner {
 	fn default() -> Self {
 		Self {
-			dhb: 0,
+			local_peer_info: PeerInfo::default(),
 			peers: Peers::default(),
 		}
 	}
@@ -84,7 +59,6 @@ impl Default for Inner {
 
 pub struct GossipValidator<Block: BlockT> {
 	inner: parking_lot::RwLock<Inner>,
-	// dhb:
 	_phantom: PhantomData<Block>,
 }
 
@@ -102,7 +76,7 @@ impl<Block: BlockT> network_gossip::Validator<Block> for GossipValidator<Block> 
 		// 1. add peer info
 		{
 			let mut inner = self.inner.write();
-			inner.peers.add(NodeId::from(who.clone()));
+			inner.peers.add(who.clone());
 			println!("{:?}", inner.peers);
 		}
 		// 2. key gen?
@@ -134,7 +108,6 @@ impl<Block: BlockT> network_gossip::Validator<Block> for GossipValidator<Block> 
 			use parking_lot::RwLockWriteGuard;
 
 			let mut inner = self.inner.write();
-			inner.dhb = 2;
 
 			let now = Instant::now();
 			let do_rebroadcast = false;

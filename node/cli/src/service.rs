@@ -198,7 +198,7 @@ construct_service_factory! {
 						// the GRANDPA voter task is considered infallible, i.e.
 						// if it fails we take down the service with it.
 						service.spawn_essential_task(grandpa::run_grandpa_voter(grandpa_config)?);
-						service.spawn_essential_task(hbbft::run_key_gen(service.network())?);
+						service.spawn_essential_task(hbbft::run_key_gen(service.client(), service.network())?);
 					},
 					(_, true) => {
 						grandpa::setup_disabled_grandpa(
@@ -228,6 +228,8 @@ construct_service_factory! {
 						client.clone(), client.clone(), select_chain
 					)?;
 				let justification_import = block_import.clone();
+
+				// hbbft::init_shared_state::<_, _, _, RuntimeApi>(client.clone());
 
 				let (import_queue, babe_link, babe_block_import, pruning_task) = import_queue(
 					Config::get_or_compute(&*client)?,
