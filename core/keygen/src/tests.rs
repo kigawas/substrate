@@ -24,7 +24,7 @@ use sr_primitives::traits::{ApiRef, Header as HeaderT, ProvideRuntimeApi};
 use std::collections::{HashMap, HashSet};
 use std::result;
 use test_client::{self, runtime::BlockNumber};
-use tokio::runtime::current_thread;
+use tokio::runtime::current_thread::Runtime as Runtime01;
 
 use super::*;
 
@@ -100,7 +100,7 @@ fn test_key_gen() {
 	let peers_len = peers.len();
 	let blocks = 50;
 
-	let mut runtime = current_thread::Runtime::new().unwrap();
+	let mut runtime = Runtime01::new().unwrap();
 
 	let net = TestNet::new(peers_len);
 	let net = Arc::new(Mutex::new(net));
@@ -117,16 +117,17 @@ fn test_key_gen() {
 
 		let (keystore, keystore_path) = create_keystore(local_key);
 
-		// if peer_id != 0 {
-		notifications.push(
-			client
-				.import_notification_stream()
-				.map(move |n| Ok::<_, ()>(n))
-				.compat()
-				.take_while(|n| Ok(n.header.number() < &blocks))
-				.for_each(move |_| Ok(())),
-		);
-		// }
+		if peer_id != 0 {
+			// 0 will not get import notification because blocks are pushed onto it
+			notifications.push(
+				client
+					.import_notification_stream()
+					.map(move |n| Ok::<_, ()>(n))
+					.compat()
+					.take_while(|n| Ok(n.header.number() < &blocks))
+					.for_each(move |_| Ok(())),
+			);
+		}
 
 		let full_client = client.as_full().unwrap();
 		let node = run_key_gen(
@@ -136,6 +137,7 @@ fn test_key_gen() {
 			keystore,
 			full_client,
 			network,
+			client.as_backend().unwrap(),
 		)
 		.unwrap()
 		.compat(); // compat future03 -> 01

@@ -182,7 +182,6 @@ macro_rules! new_full {
 				dht_event_rx,
 			);
 			service.spawn_task(authority_discovery);
-<<<<<<< HEAD
 
 			let key_gen = keygen::run_key_gen(
 				service.network().local_peer_id(),
@@ -192,8 +191,6 @@ macro_rules! new_full {
 				service.network()
 			)?;
 			service.spawn_task(key_gen.compat());
-=======
->>>>>>> 759a379681678bf8a966f0717a7f07453507cb42
 		}
 
 		let config = grandpa::Config {

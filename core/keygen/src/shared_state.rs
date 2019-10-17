@@ -1,17 +1,11 @@
-use std::{
-	//collections::VecDeque,
-	fmt::Debug,
-	//marker::PhantomData,
-	//sync::Arc,
-	//time::{Duration, Instant},
-};
+use std::fmt::Debug;
 
 //use client::blockchain::HeaderBackend;
 use client::{
-	backend::{AuxStore, },// Backend},
+	backend::AuxStore, // Backend},
 	error::Error as ClientError,
 	error::Result as ClientResult,
-//	BlockchainEvents, CallExecutor, Client,
+	//	BlockchainEvents, CallExecutor, Client,
 };
 use codec::{Decode, Encode};
 //use consensus_common::SelectChain;

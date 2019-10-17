@@ -150,6 +150,13 @@ impl PeersClient {
 		}
 	}
 
+	pub fn as_backend(&self) -> Option<Arc<test_client::Backend>> {
+		match *self{
+			PeersClient::Full(_, ref backend) => Some(backend.clone()),
+			_ => None,
+		}
+	}
+
 	pub fn as_block_import(&self) -> BoxBlockImport<Block> {
 		match *self {
 			PeersClient::Full(ref client, ref _backend) => Box::new(client.clone()) as _,

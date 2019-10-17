@@ -31,7 +31,7 @@ serde = "1.0"
 multihash = { package = "parity-multihash", version = "0.1" }
 multi-party-ecdsa = { package = "multi-party-ecdsa", git = "https://github.com/kigawas/multi-party-ecdsa", branch = "keygen-clippy"}
 
-tokio02 = { package = "tokio", version = "0.2.0-alpha.5"}
+tokio02 = { package = "tokio", version = "0.2.0-alpha.6"}
 
 [dependencies.curv]
 git = "https://github.com/KZen-networks/curv"
