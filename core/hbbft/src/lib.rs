@@ -1,55 +1,6 @@
-// Copyright 2018-2019 Parity Technologies (UK) Ltd.
-// This file is part of Substrate.
-
-// Substrate is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
-// Substrate is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-
-// You should have received a copy of the GNU General Public License
-// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
-
-//! Integration of the GRANDPA finality gadget into substrate.
-//!
-//! This crate is unstable and the API and usage may change.
-//!
-//! This crate provides a long-running future that produces finality notifications.
-//!
-//! # Usage
-//!
-//! First, create a block-import wrapper with the `block_import` function.
-//! The GRANDPA worker needs to be linked together with this block import object,
-//! so a `LinkHalf` is returned as well. All blocks imported (from network or consensus or otherwise)
-//! must pass through this wrapper, otherwise consensus is likely to break in
-//! unexpected ways.
-//!
-//! # Changing authority sets
-//!
-//! The rough idea behind changing authority sets in GRANDPA is that at some point,
-//! we obtain agreement for some maximum block height that the current set can
-//! finalize, and once a block with that height is finalized the next set will
-//! pick up finalization from there.
-//!
-//! Technically speaking, this would be implemented as a voting rule which says,
-//! "if there is a signal for a change in N blocks in block B, only vote on
-//! chains with length NUM(B) + N if they contain B". This conditional-inclusion
-//! logic is complex to compute because it requires looking arbitrarily far
-//! back in the chain.
-//!
-//! Instead, we keep track of a list of all signals we've seen so far (across
-//! all forks), sorted ascending by the block number they would be applied at.
-//! We never vote on chains with number higher than the earliest handoff block
-//! number (this is num(signal) + N). When finalizing a block, we either apply
-//! or prune any signaled changes based on whether the signaling block is
-//! included in the newly-finalized chain.
-
 extern crate serde;
 extern crate unsigned_varint;
+
 use keystore::KeyStorePtr;
 use runtime_primitives::traits::Hash as THash;
 use runtime_primitives::traits::{
@@ -936,11 +887,11 @@ where
   //let PersistentData { authority_set, set_state, consensus_changes } = persistent_data;
 
   //	register_finality_tracker_inherent_data_provider(client.clone(), &inherent_data_providers)?;
-  let (blk_out,  tx_in) = global_communication(&client, network_bridge);
+  let (blk_out, tx_in) = global_communication(&client, network_bridge);
   let txcopy = Arc::new(parking_lot::RwLock::new(tx_in));
   let tx_in_arc = txcopy.clone();
 
-  let  tx_out = TxStream {
+  let tx_out = TxStream {
     transaction_pool: t_pool.clone(),
     client: client.clone(),
   };
@@ -962,8 +913,8 @@ where
   let cclient = client.clone();
   let cblock_import = block_import.clone();
   let ping_sel = selch.clone();
-  let receiver = blk_out.for_each(move | batch| {
-	  info!("[[[[[[[");
+  let receiver = blk_out.for_each(move |batch| {
+    info!("[[[[[[[");
     let inherent_digests = generic::Digest { logs: vec![] };
     info!(
       "Processing batch with epoch {:?} of {:?} transactions into blocks",
@@ -995,7 +946,10 @@ where
     // proceed with transactions
     let mut is_first = true;
     //let mut skipped = 0;
-    info!("Attempting to push transactions from the batch. {}", batch.len());
+    info!(
+      "Attempting to push transactions from the batch. {}",
+      batch.len()
+    );
 
     for pending in batch.iter()
     {
@@ -1012,7 +966,7 @@ where
       };
       //a.data.encode()
       info!("[{:?}] Pushing to the block.", pending);
-	  info!("[{:?}] Data ", &data);
+      info!("[{:?}] Data ", &data);
       match client::block_builder::BlockBuilder::push(&mut block_builder, data.clone())
       {
         Ok(()) =>
@@ -1069,7 +1023,7 @@ where
             let (header, body) = block.deconstruct();
 
             let header_num = header.number().clone();
-            let mut parent_hash ;//= header.parent_hash().clone();
+            let mut parent_hash; //= header.parent_hash().clone();
 
             // sign the pre-sealed hash of the block and then
             // add it to a digest item.
@@ -1216,7 +1170,7 @@ where
         }
       }
     }
-	  info!("[[[[[[[--]]]]]]]");
+    info!("[[[[[[[--]]]]]]]");
 
     future::ready(())
   });

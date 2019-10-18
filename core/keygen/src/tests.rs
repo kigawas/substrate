@@ -21,8 +21,6 @@ use parking_lot::Mutex;
 use primitives::{crypto::Public, ExecutionContext, NativeOrEncoded};
 use sr_primitives::generic::BlockId;
 use sr_primitives::traits::{ApiRef, Header as HeaderT, ProvideRuntimeApi};
-use std::collections::{HashMap, HashSet};
-use std::result;
 use test_client::{self, runtime::BlockNumber};
 use tokio::runtime::current_thread::Runtime as Runtime01;
 
@@ -98,7 +96,7 @@ fn test_key_gen() {
 	];
 
 	let peers_len = peers.len();
-	let blocks = 50;
+	let blocks = 10;
 
 	let mut runtime = Runtime01::new().unwrap();
 
@@ -119,29 +117,33 @@ fn test_key_gen() {
 
 		if peer_id != 0 {
 			// 0 will not get import notification because blocks are pushed onto it
-			notifications.push(
+			notifications.push(Box::new(
 				client
 					.import_notification_stream()
-					.map(move |n| Ok::<_, ()>(n))
+					.map(|n| Ok::<_, ()>(n))
 					.compat()
-					.take_while(|n| Ok(n.header.number() < &blocks))
-					.for_each(move |_| Ok(())),
-			);
+					.take_while(|n| {
+						println!("notifi {:?}", n);
+						Ok(n.header.number() < &blocks)
+					})
+					.collect()
+					.map(|_| ()),
+			));
 		}
 
 		let full_client = client.as_full().unwrap();
-		let node = run_key_gen(
-			local_peer_id,
-			(1, peers_len as u16),
-			1,
-			keystore,
-			full_client,
-			network,
-			client.as_backend().unwrap(),
-		)
-		.unwrap()
-		.compat(); // compat future03 -> 01
-		runtime.spawn(node);
+		// let node = run_key_gen(
+		// 	local_peer_id,
+		// 	(1, peers_len as u16),
+		// 	5,
+		// 	keystore,
+		// 	full_client,
+		// 	network,
+		// 	client.as_backend().unwrap(),
+		// )
+		// .unwrap()
+		// .compat(); // compat future03 -> 01
+		// runtime.spawn(node);
 	}
 
 	let sync = futures::future::poll_fn(|| {
@@ -158,7 +160,7 @@ fn test_key_gen() {
 
 	{
 		// at this time, the blocks are not synced
-		// so only peer 0 has 2 blocks
+		// so only peer 0 has blocks
 		// but peer 0 doesn't get import_notifications since "block origin" is File
 		let mut net = net.lock();
 		net.peer(0).push_blocks(blocks as usize, false);

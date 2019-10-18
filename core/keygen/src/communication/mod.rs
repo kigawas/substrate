@@ -1,12 +1,10 @@
 use std::{future, marker::Unpin, pin::Pin, sync::Arc};
 
 use codec::{Decode, Encode};
-use futures::prelude::{Sink as Sink01, Stream as Stream01};
 use futures03::channel::oneshot::{self, Canceled};
 use futures03::compat::{Compat, Compat01As03};
 use futures03::future::FutureExt;
 use futures03::prelude::{Future, Sink, Stream, TryStream};
-use futures03::sink::SinkExt;
 use futures03::stream::{FilterMap, StreamExt, TryStreamExt};
 use futures03::task::{Context, Poll};
 use log::{error, info, trace};
@@ -104,14 +102,14 @@ where
 	S: network::specialization::NetworkSpecialization<B>,
 	H: network::ExHashT,
 {
-	type In = NetworkStream<UnboundedReceiver<TopicNotification>>;//Pin<Box<dyn Stream<Item = TopicNotification> + Send>>>;
+	type In = NetworkStream<UnboundedReceiver<TopicNotification>>; //Pin<Box<dyn Stream<Item = TopicNotification> + Send>>>;
 
 	fn messages_for(&self, topic: B::Hash) -> Self::In {
 		let (tx, rx) = oneshot::channel();
 
 		self.with_gossip(move |gossip, _| {
 			let inner_rx = gossip.messages_for(MP_ECDSA_ENGINE_ID, topic);
-		//	let inner_rx = Compat01As03::new(inner_rx).map(|x| x.unwrap()).boxed();
+			//	let inner_rx = Compat01As03::new(inner_rx).map(|x| x.unwrap()).boxed();
 			let _ = tx.send(inner_rx);
 		});
 

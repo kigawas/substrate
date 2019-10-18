@@ -52,7 +52,7 @@ use sr_primitives::traits::{Block as BlockT, DigestFor, Header, NumberFor, Provi
 
 mod communication;
 mod periodic_stream;
-mod shared_state;
+// mod shared_state;
 mod signer;
 
 use communication::{
@@ -61,7 +61,7 @@ use communication::{
 	Network, NetworkBridge,
 };
 use periodic_stream::PeriodicStream;
-use shared_state::{load_persistent, set_signers, SharedState};
+// use shared_state::{load_persistent, set_signers, SharedState};
 use signer::Signer;
 
 type Count = u16;
@@ -88,15 +88,6 @@ impl NodeConfig {
 			threshold: self.threshold,
 			share_count: self.players,
 		}
-	}
-}
-//pub trait ErrorFuture=futures03::Future<Output = Result<(),Error>>;
-//pub trait EmptyFuture=futures03::Future<Output = Result<(),()>>;
-struct EmptyWrapper;
-impl futures03::Future for EmptyWrapper {
-	type Output = Result<(), Error>;
-	fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-		Poll::Ready(Ok(()))
 	}
 }
 

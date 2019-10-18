@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use codec::Encode;
-use futures::prelude::{Future as Future01, Sink as Sink01, Stream as Stream01};
 use futures::sync::mpsc as mpsc01;
 use futures03::channel::{mpsc, oneshot};
 use futures03::compat::{Compat, Compat01As03};

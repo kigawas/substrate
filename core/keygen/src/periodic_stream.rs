@@ -22,7 +22,7 @@ where
 	S: Stream<Item = M>,
 {
 	incoming: Fuse<S>,
-	check_pending: Pin<Box<dyn Stream<Item = Result<Instant, tokio_timer::Error>> + Send>>,
+	check_pending: Pin<Box<dyn Stream<Item = Instant> + Send>>,
 	ready: VecDeque<M>,
 }
 
@@ -35,7 +35,10 @@ where
 
 		Self {
 			incoming: stream.fuse(),
-			check_pending: Interval01::new_interval(dur).compat().boxed(),
+			check_pending: Interval01::new_interval(dur)
+				.compat()
+				.map(|x| x.unwrap())
+				.boxed(),
 			ready: VecDeque::new(),
 		}
 	}
@@ -53,23 +56,23 @@ where
 			match self.incoming.poll_next_unpin(cx) {
 				Poll::Ready(None) => break,
 				Poll::Ready(Some(input)) => {
-					let ready = &mut self.ready;
-					ready.push_back(input);
+					self.ready.push_back(input);
 				}
 				Poll::Pending => break,
 			}
 		}
 
-		if let Some(_) = match self.check_pending.poll_next_unpin(cx) {
-			Poll::Ready(r) => match r.unwrap() {
-				Ok(instant) => Some(instant),
-				Err(e) => panic!(e),
-			},
-			Poll::Pending => return { Poll::Pending },
-		} {}
+		let mut is_ready = false;
+		if let Poll::Ready(Some(_)) = self.check_pending.poll_next_unpin(cx) {
+			is_ready = true;
+		}
 
 		if let Some(ready) = self.ready.pop_front() {
 			return Poll::Ready(Some(ready));
+		}
+
+		if !is_ready {
+			return Poll::Pending;
 		}
 
 		if self.incoming.is_done() {

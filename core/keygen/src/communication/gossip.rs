@@ -10,7 +10,7 @@ use std::{
 
 use network::consensus_gossip::{self as network_gossip, MessageIntent, ValidatorContext};
 use network::{config::Roles, PeerId};
-use sr_primitives::traits::{Block as BlockT};
+use sr_primitives::traits::Block as BlockT;
 
 use super::{
 	message::{ConfirmPeersMessage, KeyGenMessage, SignMessage},
@@ -344,7 +344,6 @@ impl<Block: BlockT> network_gossip::Validator<Block> for GossipValidator<Block> 
 						KeyGenMessage::Proof(from, _) => {
 							println!("proof from {:?}", from);
 						}
-						_ => {}
 					},
 					_ => {}
 				}
