@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 use futures::prelude::*;
 use futures::sync::{oneshot, mpsc};
+use futures03::stream::{StreamExt, TryStreamExt};
 use grandpa::Message::{Prevote, Precommit, PrimaryPropose};
 use grandpa::{voter, voter_set::VoterSet};
 use log::{debug, trace};
@@ -145,12 +146,19 @@ impl<B, S, H> Network<B> for Arc<NetworkService<B, S, H>> where
 	S: network::specialization::NetworkSpecialization<B>,
 	H: network::ExHashT,
 {
-	type In = NetworkStream;
+	type In = NetworkStream<
+		Box<dyn Stream<Item = network_gossip::TopicNotification, Error = ()> + Send + 'static>,
+	>;
 
+	#[allow(deprecated)]
 	fn messages_for(&self, topic: B::Hash) -> Self::In {
 		let (tx, rx) = oneshot::channel();
 		self.with_gossip(move |gossip, _| {
-			let inner_rx = gossip.messages_for(GRANDPA_ENGINE_ID, topic);
+			let inner_rx = gossip
+				.messages_for(GRANDPA_ENGINE_ID, topic)
+				.map(|x| Ok(x))
+				.compat()
+				.boxed(); // Box::new() will break
 			let _ = tx.send(inner_rx);
 		});
 		NetworkStream { outer: rx, inner: None }
@@ -203,12 +211,15 @@ impl<B, S, H> Network<B> for Arc<NetworkService<B, S, H>> where
 }
 
 /// A stream used by NetworkBridge in its implementation of Network.
-pub struct NetworkStream {
-	inner: Option<mpsc::UnboundedReceiver<network_gossip::TopicNotification>>,
-	outer: oneshot::Receiver<mpsc::UnboundedReceiver<network_gossip::TopicNotification>>
+pub struct NetworkStream<R> {
+	inner: Option<R>,
+	outer: oneshot::Receiver<R>,
 }
 
-impl Stream for NetworkStream {
+impl<R> Stream for NetworkStream<R>
+where
+	R: Stream<Item = network_gossip::TopicNotification, Error = ()>,
+{
 	type Item = network_gossip::TopicNotification;
 	type Error = ();
 
@@ -221,9 +232,9 @@ impl Stream for NetworkStream {
 				let poll_result = inner.poll();
 				self.inner = Some(inner);
 				poll_result
-			},
+			}
 			Ok(futures::Async::NotReady) => Ok(futures::Async::NotReady),
-			Err(_) => Err(())
+			Err(_) => Err(()),
 		}
 	}
 }

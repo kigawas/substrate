@@ -117,7 +117,7 @@ fn test_key_gen() {
 
 		if peer_id != 0 {
 			// 0 will not get import notification because blocks are pushed onto it
-			notifications.push(Box::new(
+			notifications.push(
 				client
 					.import_notification_stream()
 					.map(|n| Ok::<_, ()>(n))
@@ -126,9 +126,8 @@ fn test_key_gen() {
 						println!("notifi {:?}", n);
 						Ok(n.header.number() < &blocks)
 					})
-					.collect()
-					.map(|_| ()),
-			));
+					.collect(),
+			);
 		}
 
 		let full_client = client.as_full().unwrap();
