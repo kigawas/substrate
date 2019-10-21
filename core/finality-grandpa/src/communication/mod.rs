@@ -49,7 +49,7 @@ use crate::{
 };
 use crate::environment::HasVoted;
 use gossip::{
-	GossipMessage, FullCatchUpMessage, FullCommitMessage, VoteOrPrecommitMessage, GossipValidator
+	GossipMessage, FullCatchUpMessage, FullCommitMessage, VoteMessage, GossipValidator
 };
 use fg_primitives::{
 	AuthorityPair, AuthorityId, AuthoritySignature, SetId as SetIdNumber, RoundNumber,
@@ -152,6 +152,15 @@ impl<B, S, H> Network<B> for Arc<NetworkService<B, S, H>> where
 
 	#[allow(deprecated)]
 	fn messages_for(&self, topic: B::Hash) -> Self::In {
+		// Given that one can only communicate with the Substrate network via the `NetworkService` via message-passing,
+		// and given that methods on the network consensus gossip are not exposed but only reachable by passing a
+		// closure into `with_gossip` on the `NetworkService` this function needs to make use of the `NetworkStream`
+		// construction.
+		//
+		// We create a oneshot channel and pass the sender within a closure to the network. At some point in the future
+		// the network passes the message channel back through the oneshot channel. But the consumer of this function
+		// expects a stream, not a stream within a oneshot. This complexity is abstracted within `NetworkStream`,
+		// waiting for the oneshot to resolve and from there on acting like a normal message channel.
 		let (tx, rx) = oneshot::channel();
 		self.with_gossip(move |gossip, _| {
 			let inner_rx = gossip
@@ -161,7 +170,7 @@ impl<B, S, H> Network<B> for Arc<NetworkService<B, S, H>> where
 				.boxed(); // Box::new() will break
 			let _ = tx.send(inner_rx);
 		});
-		NetworkStream { outer: rx, inner: None }
+		NetworkStream::PollingOneshot(rx)
 	}
 
 	fn register_validator(&self, validator: Arc<dyn network_gossip::Validator<B>>) {
@@ -210,10 +219,18 @@ impl<B, S, H> Network<B> for Arc<NetworkService<B, S, H>> where
 	}
 }
 
-/// A stream used by NetworkBridge in its implementation of Network.
-pub struct NetworkStream<R> {
-	inner: Option<R>,
-	outer: oneshot::Receiver<R>,
+/// A stream used by NetworkBridge in its implementation of Network. Given a oneshot that eventually returns a channel
+/// which eventually returns messages, instead of:
+///
+/// 1. polling the oneshot until it returns a message channel
+///
+/// 2. polling the message channel for messages
+///
+/// `NetworkStream` combines the two steps into one, requiring a consumer to only poll `NetworkStream` to retrieve
+/// messages directly.
+pub enum NetworkStream<R> {
+	PollingOneshot(oneshot::Receiver<R>),
+	PollingTopicNotifications(R),
 }
 
 impl<R> Stream for NetworkStream<R>
@@ -224,17 +241,21 @@ where
 	type Error = ();
 
 	fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-		if let Some(ref mut inner) = self.inner {
-			return inner.poll();
-		}
-		match self.outer.poll() {
-			Ok(futures::Async::Ready(mut inner)) => {
-				let poll_result = inner.poll();
-				self.inner = Some(inner);
-				poll_result
-			}
-			Ok(futures::Async::NotReady) => Ok(futures::Async::NotReady),
-			Err(_) => Err(()),
+		match self {
+			NetworkStream::PollingOneshot(oneshot) => {
+				match oneshot.poll() {
+					Ok(futures::Async::Ready(mut stream)) => {
+						let poll_result = stream.poll();
+						*self = NetworkStream::PollingTopicNotifications(stream);
+						poll_result
+					},
+					Ok(futures::Async::NotReady) => Ok(futures::Async::NotReady),
+					Err(_) => Err(())
+				}
+			},
+			NetworkStream::PollingTopicNotifications(stream) => {
+				stream.poll()
+			},
 		}
 	}
 }
@@ -286,8 +307,8 @@ impl<B: BlockT, N: Network<B>> NetworkBridge<B, N> {
 				validator.note_round(Round(round.number), |_, _| {});
 
 				for signed in round.votes.iter() {
-					let message = gossip::GossipMessage::VoteOrPrecommit(
-						gossip::VoteOrPrecommitMessage::<B> {
+					let message = gossip::GossipMessage::Vote(
+						gossip::VoteMessage::<B> {
 							message: signed.clone(),
 							round: Round(round.number),
 							set_id: SetId(set_id),
@@ -352,7 +373,8 @@ impl<B: BlockT, N: Network<B>> NetworkBridge<B, N> {
 		);
 	}
 
-	/// Get the round messages for a round in the current set ID. These are signature-checked.
+	/// Get a stream of signature-checked round messages from the network as well as a sink for round messages to the
+	/// network all within the current set.
 	pub(crate) fn round_communication(
 		&self,
 		round: Round,
@@ -390,7 +412,7 @@ impl<B: BlockT, N: Network<B>> NetworkBridge<B, N> {
 			})
 			.and_then(move |msg| {
 				match msg {
-					GossipMessage::VoteOrPrecommit(msg) => {
+					GossipMessage::Vote(msg) => {
 						// check signature.
 						if !voters.contains_key(&msg.message.id) {
 							debug!(target: "afg", "Skipping message from unknown voter {}", msg.message.id);
@@ -718,7 +740,7 @@ impl<Block: BlockT, N: Network<Block>> Sink for OutgoingMessages<Block, N>
 				id: local_id.clone(),
 			};
 
-			let message = GossipMessage::VoteOrPrecommit(VoteOrPrecommitMessage::<Block> {
+			let message = GossipMessage::Vote(VoteMessage::<Block> {
 				message: signed.clone(),
 				round: Round(self.round),
 				set_id: SetId(self.set_id),
