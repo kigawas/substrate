@@ -494,7 +494,7 @@ fn finalize_3_voters_1_full_observer() {
 			client.finality_notification_stream()
 				.map(|v| Ok::<_, ()>(v)).compat()
 				.take_while(|n| Ok(n.header.number() < &20))
-				.for_each(move |_| Ok(()))
+				.collect()
 		);
 
 		let keystore = if let Some(local_key) = local_key {

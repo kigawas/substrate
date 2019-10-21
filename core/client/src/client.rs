@@ -113,8 +113,8 @@ impl Default for ExecutionStrategies {
 		ExecutionStrategies {
 			syncing: ExecutionStrategy::NativeElseWasm,
 			importing: ExecutionStrategy::NativeElseWasm,
-			block_construction: ExecutionStrategy::AlwaysWasm,
-		//	block_construction: ExecutionStrategy::NativeWhenPossible,
+			// block_construction: ExecutionStrategy::AlwaysWasm,
+			block_construction: ExecutionStrategy::NativeWhenPossible,
 			offchain_worker: ExecutionStrategy::NativeWhenPossible,
 			other: ExecutionStrategy::NativeElseWasm,
 		}
@@ -799,7 +799,8 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	pub fn lock_import_and_run<R, Err, F>(&self, f: F) -> Result<R, Err> where
 		F: FnOnce(&mut ClientImportOperation<Block, Blake2Hasher, B>) -> Result<R, Err>,
 		Err: From<error::Error>,
-	{
+	{		println!("IMPORTED");
+
 		let inner = || {
 			let _import_lock = self.backend.get_import_lock().lock();
 
@@ -814,7 +815,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			let ClientImportOperation { op, notify_imported, notify_finalized } = op;
 			self.backend.commit_operation(op)?;
 			self.notify_finalized(notify_finalized)?;
-
+			println!("{:?}", notify_imported.is_some());
 			if let Some(notify_imported) = notify_imported {
 				self.notify_imported(notify_imported)?;
 			}
@@ -914,6 +915,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	) -> error::Result<ImportResult> where
 		E: CallExecutor<Block, Blake2Hasher> + Send + Sync + Clone,
 	{
+		println!("origin {:?}", origin);
 		let parent_hash = import_headers.post().parent_hash().clone();
 		match self.backend.blockchain().status(BlockId::Hash(hash))? {
 			blockchain::BlockStatus::InChain => return Ok(ImportResult::AlreadyInChain),
@@ -988,7 +990,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		operation.op.update_cache(new_cache);
 		if let Some(storage_update) = storage_update {
 			         info!("storage_update ");
-		
+
 			operation.op.update_db_storage(storage_update)?;
 		}
 		if let Some(storage_changes) = storage_changes.clone() {
@@ -1592,7 +1594,7 @@ impl<B, E, Block, RA> consensus::BlockImport<Block> for Client<B, E, Block, RA> 
 	}
 }
 
-impl<B, E, Block, RA> Finalizer<Block, Blake2Hasher, B> for Client<B, E, Block, RA> where 
+impl<B, E, Block, RA> Finalizer<Block, Blake2Hasher, B> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
@@ -1616,7 +1618,7 @@ impl<B, E, Block, RA> Finalizer<Block, Blake2Hasher, B> for Client<B, E, Block, 
 	}
 }
 
-impl<B, E, Block, RA> Finalizer<Block, Blake2Hasher, B> for &Client<B, E, Block, RA> where 
+impl<B, E, Block, RA> Finalizer<Block, Blake2Hasher, B> for &Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
@@ -1783,7 +1785,7 @@ impl<B, E, Block, RA> backend::AuxStore for &Client<B, E, Block, RA>
 		B: backend::Backend<Block, Blake2Hasher>,
 		E: CallExecutor<Block, Blake2Hasher>,
 		Block: BlockT<Hash=H256>,
-{ 
+{
 
 	fn insert_aux<
 		'a,

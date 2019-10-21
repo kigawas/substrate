@@ -96,7 +96,7 @@ fn test_key_gen() {
 	];
 
 	let peers_len = peers.len();
-	let blocks = 10;
+	let blocks = 3;
 
 	let mut runtime = Runtime01::new().unwrap();
 
@@ -122,10 +122,7 @@ fn test_key_gen() {
 					.import_notification_stream()
 					.map(|n| Ok::<_, ()>(n))
 					.compat()
-					.take_while(|n| {
-						println!("notifi {:?}", n);
-						Ok(n.header.number() < &blocks)
-					})
+					.take_while(move |n| Ok(n.header.number() < &blocks))
 					.collect(),
 			);
 		}
@@ -145,17 +142,21 @@ fn test_key_gen() {
 		// runtime.spawn(node);
 	}
 
-	let sync = futures::future::poll_fn(|| {
-		// make sure all peers are connected first
-		net.lock().poll();
-		if net.lock().peer(0).num_peers() < peers_len - 1 {
-			Ok(Async::NotReady)
-		} else {
-			Ok(Async::Ready(()))
-		}
-	});
+	// let sync = futures::future::poll_fn(|| {
+	// 	// make sure all peers are connected first
+	// 	net.lock().poll();
+	// 	let peers0 = net.lock().peer(0).num_peers();
+	// 	let peers1 = net.lock().peer(1).num_peers();
+	// 	println!("{:?} {:?}", peers0, peers1);
+	// 	if peers0 != peers_len - 1 || peers1 != peers_len - 1 {
+	// 		Ok(Async::NotReady)
+	// 	} else {
+	// 		Ok(Async::Ready(()))
+	// 	}
+	// });
 
-	runtime.block_on(sync.map_err(|_: ()| ())).unwrap();
+	// runtime.block_on(sync.map_err(|_: ()| ())).unwrap();
+	// println!("connected");
 
 	{
 		// at this time, the blocks are not synced
@@ -165,17 +166,17 @@ fn test_key_gen() {
 		net.peer(0).push_blocks(blocks as usize, false);
 		assert_eq!(net.peer(0).client().info().chain.best_number, blocks);
 		assert_eq!(net.peer(1).client().info().chain.best_number, 0);
+		net.block_until_sync(&mut runtime);
 	}
 
-	let wait_for = futures::future::join_all(notifications)
-		.map(|_| ())
-		.map_err(|_| ());
+	// 	let wait_for = futures::future::join_all(notifications)
+	// 		.map(|_| ())
+	// 		.map_err(|_| ());
 
-	let poll_forever = futures::future::poll_fn(|| {
-		net.lock().poll();
-		Ok(Async::NotReady)
-	});
-	let _ = runtime
-		.block_on(wait_for.select(poll_forever).map_err(|_| ()))
-		.unwrap();
+	// 	let poll_forever = futures::future::poll_fn(|| {
+	// 		net.lock().poll();
+	// 		println!("syncing");
+	// 		Ok(net.lock().poll_until_sync())
+	// 	});
+	// 	let _ = runtime.block_on(poll_forever.join(wait_for)).unwrap();
 }
