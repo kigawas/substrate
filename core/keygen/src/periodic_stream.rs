@@ -13,16 +13,14 @@ use futures03::compat::{Compat, Stream01CompatExt};
 use futures03::prelude::{Stream, TryStream};
 use futures03::stream::{FilterMap, Fuse, StreamExt, TryStreamExt};
 use futures03::task::{Context, Poll};
-
-// TODO change to tokio 0.2's interval when runtime changed to 0.2
-use tokio_timer::Interval as Interval01;
+use futures_timer::Interval;
 
 pub struct PeriodicStream<S, M>
 where
 	S: Stream<Item = M>,
 {
 	incoming: Fuse<S>,
-	check_pending: Pin<Box<dyn Stream<Item = Instant> + Send>>,
+	check_pending: Interval,
 	ready: VecDeque<M>,
 }
 
@@ -35,10 +33,7 @@ where
 
 		Self {
 			incoming: stream.fuse(),
-			check_pending: Interval01::new_interval(dur)
-				.compat()
-				.map(|x| x.unwrap())
-				.boxed(),
+			check_pending: Interval::new(dur),
 			ready: VecDeque::new(),
 		}
 	}
@@ -90,14 +85,13 @@ mod test {
 		future::{self, Future, FutureExt, TryFutureExt},
 		stream,
 	};
-	use tokio::runtime::Runtime as Runtime01;
+	use tokio::runtime::current_thread::Runtime as Runtime01;
+	use tokio02::runtime::current_thread::Runtime;
 
 	use super::*;
 
 	#[test]
 	fn test_periodic() {
-		let mut rt01 = Runtime01::new().unwrap();
-
 		struct F<S>
 		where
 			S: Stream<Item = u8>,
@@ -133,9 +127,10 @@ mod test {
 
 		let s = stream::repeat(1u8).take(5);
 		let f = F {
-			s: PeriodicStream::<_, u8>::new(s, 5),
+			s: PeriodicStream::<_, _>::new(s, 5),
 		};
 
+		let mut rt01 = Runtime01::new().unwrap();
 		let _ = rt01
 			.block_on(f.map(|_| -> Result<(), ()> { Ok(()) }).compat())
 			.unwrap();

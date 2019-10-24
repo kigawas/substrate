@@ -36,7 +36,6 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::{
 use parking_lot::RwLock;
 use rand::prelude::Rng;
 use tokio02::timer::Interval;
-use tokio_executor::DefaultExecutor;
 
 use client::{
 	backend::Backend, error::Error as ClientError, error::Result as ClientResult, BlockchainEvents,
