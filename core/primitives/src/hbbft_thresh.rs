@@ -277,7 +277,7 @@ impl<'de> Deserialize<'de> for Public {
 			Ok(res) =>Ok(Public(res)),
 			Err(e) =>Err(e)
 		}
-		 
+
 	}
 }
 
@@ -533,15 +533,15 @@ impl TraitPair for Pair {
 	}
 
 	/// Generate a key from the phrase, password and derivation path.
-	fn from_standard_components<I: Iterator<Item=DeriveJunction>>(
-		phrase: &str,
-		password: Option<&str>,
-		path: I
-	) -> Result<Pair, SecretStringError> {
-		Self::from_phrase(phrase, password)?.0
-			.derive(path)
-			.map_err(|_| SecretStringError::InvalidPath)
-	}
+	// fn from_standard_components<I: Iterator<Item=DeriveJunction>>(
+	// 	phrase: &str,
+	// 	password: Option<&str>,
+	// 	path: I
+	// ) -> Result<Pair, SecretStringError> {
+	// 	Self::from_phrase(phrase, password)?.0
+	// 		.derive(path)
+	// 		.map_err(|_| SecretStringError::InvalidPath)
+	// }
 
 	fn generate_with_phrase(password: Option<&str>) -> (Pair, String, Seed) {
 		let mnemonic = Mnemonic::new(MnemonicType::Words12, Language::English);
@@ -553,7 +553,7 @@ impl TraitPair for Pair {
 			phrase.to_owned(),
 			seed,
 		)
-		
+
 	}
 
 	fn from_phrase(phrase: &str, password: Option<&str>) -> Result<(Pair, Seed), SecretStringError> {
@@ -562,13 +562,13 @@ impl TraitPair for Pair {
 			.map(|m| Self::from_entropy(m.entropy(), password))
 	}
 
-	fn derive<Iter: Iterator<Item=DeriveJunction>>(&self, _path: Iter) -> Result<Pair, Self::DeriveError> {
+	fn derive<Iter: Iterator<Item=DeriveJunction>>(&self, _path: Iter, _seed: Option<Self::Seed>) -> Result<(Pair,Option<Seed>), Self::DeriveError> {
 		/*let init = self.0.secret.clone();
 		let result = path.fold(init, |acc, j| match j {
 			DeriveJunction::Soft(cc) => acc.derived_key_simple(ChainCode(cc), &[]).0,
 			DeriveJunction::Hard(cc) => derive_hard_junction(&acc, &cc),
 		});*/
-		Ok( self.clone())//Self(result.into()))
+		Ok( (self.clone(), None))//Self(result.into()))
 	}
 
 	fn sign(&self, message: &[u8]) -> Signature {
@@ -582,9 +582,9 @@ impl TraitPair for Pair {
 		match PublicKey::from_bytes(pubkey.0)
 		{
 			Ok(pk) => pk.verify(&sig.clone().into(), message),
-			Err(_) => return false 
+			Err(_) => return false
 		}
-		
+
 	}
 
 	/// Verify a signature on a message. Returns true if the signature is good.
@@ -594,7 +594,7 @@ impl TraitPair for Pair {
 		match PublicKey::from_bytes(ser)
 		{
 			Ok(pk) => pk.verify(& Signature::try_from(sig).expect("Length error").into(), message),
-			Err(_) => return false 
+			Err(_) => return false
 		}
 	}
 	/// Return a vec filled with raw data.
