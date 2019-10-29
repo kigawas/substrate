@@ -24,8 +24,11 @@ use primitives::offchain::StorageKind;
 use rstd::prelude::*;
 use sr_primitives::traits::Member;
 use sr_primitives::traits::Printable;
-use sr_primitives::{
+use sr_primitives::{RuntimeDebug,
   generic::{DigestItem, OpaqueDigestItemId},
+  	transaction_validity::{
+		TransactionValidity, TransactionLongevity, ValidTransaction, InvalidTransaction,
+	},
  // traits::Zero,
  // Perbill,
 };
@@ -105,6 +108,7 @@ decl_storage! {
   trait Store for Module<T: Trait> as Keygen {
     /// The current active requests
     pub Keys get(keys): Vec<T::AuthorityId>;
+    pub Test get(test): u64;
    // pub ReqIds get(requests): Vec<u64>;
     pub RequestResults: map u64 => Option<Option<[u8;32]>>;
 
@@ -143,8 +147,7 @@ impl Printable for OffchainErr
   }
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Encode, Decode, Clone, PartialEq, Eq,RuntimeDebug)]
 pub struct KeygenResult
 {
   pub req_id: u64,
@@ -152,11 +155,17 @@ pub struct KeygenResult
   pub our_auth_index: AuthIndex,
 }
 
+
 decl_module! {
   pub struct Module<T: Trait> for enum Call where origin: T::Origin {
     fn deposit_event() = default;
 
-
+    fn set_test(origin)
+    {
+       print("Offchain ONCHAIN");
+      <Self as Store>::Test::put(10);
+      
+    }
     fn report_result(
       origin,
       result:KeygenResult,
@@ -216,6 +225,9 @@ decl_module! {
 
         // Runs after every block.
     fn offchain_worker(_now: T::BlockNumber) {
+       print("Offchain OFFCHAIN");
+          let call = Call::set_test();
+      T::SubmitTransaction::submit_unsigned(call).map_err(|_| OffchainErr::SubmitTransaction);
       // Only send messages if we are a potential validator.
       if runtime_io::is_validator() {
 //        let mut requests = <ReqIds>::get();
@@ -307,4 +319,41 @@ impl<T: Trait> Module<T>
     let id = OpaqueDigestItemId::Consensus(&MP_ECDSA_ENGINE_ID);
     digest.convert_first(|l| l.try_to::<ConsensusLog>(id))
   }
+}
+
+
+impl<T: Trait> srml_support::unsigned::ValidateUnsigned for Module<T> {
+	type Call = Call<T>;
+
+	fn validate_unsigned(call: &Self::Call) -> TransactionValidity {
+    print("OFFCHAIN VALIDATE");
+		if let Call::set_test() = call {
+	
+  	return Ok(ValidTransaction {
+				priority: 0,
+				requires: vec![],
+				provides: vec![b"OFFCHAIN".encode()],
+				longevity: TransactionLongevity::max_value(),
+				propagate: true,
+			});
+	
+		
+		
+		} else {
+			
+     if let  Call::report_result(res, signature)= call
+     {
+       	return Ok(ValidTransaction {
+				priority: 0,
+				requires: vec![],
+				provides: vec![signature.encode()],
+				longevity: TransactionLongevity::max_value(),
+				propagate: true,
+			});
+     }
+
+
+		}
+    	InvalidTransaction::Call.into() 
+	}
 }

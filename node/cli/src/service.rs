@@ -32,8 +32,11 @@ use substrate_service::{
 use transaction_pool::{self, txpool::{Pool as TransactionPool}};
 use inherents::InherentDataProviders;
 use network::construct_simple_protocol;
+<<<<<<< HEAD
 use keygen::{self};
 use futures03::future::TryFutureExt;
+=======
+>>>>>>> ac4ee341f69bd9beb979963adc66396068b38eae
 
 use substrate_service::{NewService, NetworkStatus};
 use client::{Client, LocalCallExecutor};
@@ -590,4 +593,8 @@ mod tests {
 			],
 		)
 	}
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> ac4ee341f69bd9beb979963adc66396068b38eae

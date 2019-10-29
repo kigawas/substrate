@@ -1,90 +1,6 @@
-// Copyright 2019 Parity Technologies (UK) Ltd.
-// This file is part of Substrate.
-
-// Substrate is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
-// Substrate is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-
-// You should have received a copy of the GNU General Public License
-// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
-
-//! Gossip and politeness for polite-grandpa.
-//!
-//! This module implements the following message types:
-//! #### Neighbor Packet
-//!
-//! The neighbor packet is sent to only our neighbors. It contains this information
-//!
-//!   - Current Round
-//!   - Current voter set ID
-//!   - Last finalized hash from commit messages.
-//!
-//! If a peer is at a given voter set, it is impolite to send messages from
-//! an earlier voter set. It is extremely impolite to send messages
-//! from a future voter set. "future-set" messages can be dropped and ignored.
-//!
-//! If a peer is at round r, is impolite to send messages about r-2 or earlier and extremely
-//! impolite to send messages about r+1 or later. "future-round" messages can
-//!  be dropped and ignored.
-//!
-//! It is impolite to send a neighbor packet which moves backwards in protocol state.
-//!
-//! This is beneficial if it conveys some progress in the protocol state of the peer.
-//!
-//! #### Prevote / Precommit
-//!
-//! These are votes within a round. Noting that we receive these messages
-//! from our peers who are not necessarily voters, we have to account the benefit
-//! based on what they might have seen.
-//!
-//! #### Propose
-//!
-//! This is a broadcast by a known voter of the last-round estimate.
-//!
-//! #### Commit
-//!
-//! These are used to announce past agreement of finality.
-//!
-//! It is impolite to send commits which are earlier than the last commit
-//! sent. It is especially impolite to send commits which are invalid, or from
-//! a different Set ID than the receiving peer has indicated.
-//!
-//! Sending a commit is polite when it may finalize something that the receiving peer
-//! was not aware of.
-//!
-//! #### Catch Up
-//!
-//! These allow a peer to request another peer, which they perceive to be in a
-//! later round, to provide all the votes necessary to complete a given round
-//! `R`.
-//!
-//! It is impolite to send a catch up request for a round `R` to a peer whose
-//! announced view is behind `R`. It is also impolite to send a catch up request
-//! to a peer in a new different Set ID.
-//!
-//! The logic for issuing and tracking pending catch up requests is implemented
-//! in the `GossipValidator`. A catch up request is issued anytime we see a
-//! neighbor packet from a peer at a round `CATCH_UP_THRESHOLD` higher than at
-//! we are.
-//!
-//! ## Expiration
-//!
-//! We keep some amount of recent rounds' messages, but do not accept new ones from rounds
-//! older than our current_round - 1.
-//!
-//! ## Message Validation
-//!
-//! We only send polite messages to peers,
-
 //use runtime_primitives::traits::Block as BlockT;
 //use network::consensus_gossip::{self as network_gossip, MessageIntent, ValidatorContext};
-use fg_primitives::{AuthorityId, AuthoritySignature};
+use badger_primitives::{AuthorityId, AuthoritySignature};
 use network::PeerId; //config::Roles,
 use parity_codec::{Decode, Encode};
 
@@ -107,18 +23,18 @@ use std::collections::HashMap;
 //const KEEP_RECENT_ROUNDS: usize = 3;
 
 //const BADGER_TOPIC: &str = "itsasnake";
-
 use crate::communication::PeerIdW;
 /// HB gossip message type.
 /// This is the root type that gets encoded and sent on the network.
 #[derive(Debug, Encode, Decode)]
 pub enum GossipMessage
 {
-  /// Grandpa message with round and set info.
+  /// Greeting to register peer id. Probably should be replaced by Session aspects
   Greeting(GreetingMessage),
   /// Raw Badger data
   BadgerData(BadgeredMessage),
 
+  KeygenData(BadgeredMessage),
   RequestGreeting,
 }
 
@@ -294,19 +210,10 @@ impl Peers
 pub enum Action<H>
 {
   // repropagate under given topic, to the given peers, applying cost/benefit to originator.
-  Keep(),
+  Keep,
   // discard and process.
-  ProcessAndDiscard(),
+  ProcessAndDiscard,
   // discard
-  Discard(i32),
+  Discard,
   Useless(H),
 }
-
-/*struct Inner
-{
-  //local_view: Option<View<NumberFor<Block>>>,
-  peers: Peers,
-  authorities: Vec<AuthorityId>,
-  config: crate::Config,
-  next_rebroadcast: Instant,
-}*/

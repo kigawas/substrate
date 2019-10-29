@@ -158,9 +158,98 @@ pub(crate) struct Environment<B, E, Block: BlockT, N: Network<Block>, RA, Storag
 	pub offchain: Arc<RwLock<Storage>>,
 }
 
-struct KeyGenWork<B, E, Block: BlockT, N: Network<Block>, RA, Storage> {
-	key_gen: Pin<Box<dyn Future<Output = Result<(), Error>> + Send + Unpin>>,
-	env: Arc<Environment<B, E, Block, N, RA, Storage>>,
+use mpe_primitives::MAIN_DB_PREFIX;
+pub const STORAGE_PREFIX: &[u8] = b"storage";
+use primitives::crypto::Public;
+use mpe_primitives::{get_data_prefix,get_key_prefix,get_complete_list_prefix,RequestId};
+impl<B, E, Block: BlockT, N: Network<Block>, RA,Storage> Environment<B, E, Block, N, RA,Storage>
+where Storage:OffchainStorage
+{
+	pub fn set_request_data(&self,request_id:RequestId,request_data:&[u8])
+	{
+		let  key:Vec<u8>=get_data_prefix(request_id);
+		self.local_storage_set(StorageKind::PERSISTENT, &key, request_data)
+	}
+    pub fn set_request_complete(&self,request_id:RequestId) ->Result<(),&'static str>
+	{
+		let  key:Vec<u8>=get_complete_list_prefix();
+		let mut reqs=Vec::<RequestId>::new();
+        if let Some(data)=self.local_storage_get(&key)
+		{
+			reqs=match Decode::decode(&mut data.as_ref())
+			{
+				Ok(res) => res,
+				Err(_) => return Err("Invalid data stored")
+			}
+		}
+		reqs.push(request_id);
+		reqs.sort();
+		reqs.dedup();
+        self.local_storage_set(StorageKind::PERSISTENT,&key,&reqs.encode());
+		Ok(())
+	}
+	pub fn set_request_public_key<PK>(&self,request_id:RequestId,public_key:&PK) ->Result<(),&'static str>
+	where PK:  Public
+	{
+		let  key:Vec<u8>=get_key_prefix(request_id);
+		if let Some(_)=self.local_storage_get(&key)
+		{
+			return Err("Can only set key once per request")
+		}
+		self.local_storage_set(StorageKind::PERSISTENT, &key, public_key.as_slice())  ;
+		self.set_request_complete(request_id)?;
+
+		Ok(())
+
+	}
+	pub fn set_request_failure(&self,request_id:RequestId) ->Result<(),&'static str>
+	{
+		let mut key:Vec<u8>=get_key_prefix(request_id);
+		if let Some(_)=self.local_storage_get(&key)
+		{
+			return Err("Can only set key/fail once per request")
+		}
+		let fail=[255u8;1];
+
+		self.local_storage_set(StorageKind::PERSISTENT, &key, &fail) ;
+		self.set_request_complete(request_id)?;
+
+		Ok(())
+
+	}
+
+	pub fn local_storage_set(&self, kind: StorageKind, key: &[u8], value: &[u8]) {
+		match kind {
+			StorageKind::PERSISTENT => self.offchain.write().set(STORAGE_PREFIX, key, value),
+			StorageKind::LOCAL => {},
+		}
+	}
+	pub fn local_storage_get(&self,  key: &[u8]) -> Option<Vec<u8>>
+	{
+			self.offchain.read().get(STORAGE_PREFIX, key)
+	}
+	pub fn local_storage_compare_and_set(
+		&self,
+		kind: StorageKind,
+		key: &[u8],
+		old_value: Option<&[u8]>,
+		new_value: &[u8],
+	) -> bool {
+		match kind {
+			StorageKind::PERSISTENT => {
+				self.offchain.write().compare_and_set(STORAGE_PREFIX, key, old_value, new_value)
+			},
+			StorageKind::LOCAL => false ,
+		}
+	}
+
+}
+
+
+struct KeyGenWork<B, E, Block: BlockT, N: Network<Block>, RA, Storage>
+{
+  key_gen: Pin<Box<dyn Future<Output = Result<(), Error>> + Send + Unpin>>,
+  env: Arc<Environment<B, E, Block, N, RA, Storage>>,
 }
 
 impl<B, E, Block, N, RA, Storage> KeyGenWork<B, E, Block, N, RA, Storage>
@@ -297,54 +386,54 @@ where
 	N::In: Send + 'static,
 	RA: Send + Sync + 'static,
 {
-	let keyclone = keystore.clone();
-	let config = NodeConfig {
-		threshold,
-		players,
-		keystore: Some(keystore),
-		duration,
-	};
+  let keyclone = keystore.clone();
+  let config = NodeConfig {
+    threshold,
+    players,
+    keystore: Some(keystore),
+    duration,
+  };
 
-	// let keystore = keystore.read();
+  // let keystore = keystore.read();
 
-	// let persistent_data: SharedState = load_persistent(&**client.backend()).unwrap();
-	// println!("{:?}", persistent_data);
-	// println!("Local peer ID {:?}", current_id.as_bytes());
+  // let persistent_data: SharedState = load_persistent(&**client.backend()).unwrap();
+  // println!("{:?}", persistent_data);
+  // println!("Local peer ID {:?}", current_id.as_bytes());
 
-	// let mut signers = persistent_data.signer_set;
-	// let current_id = current_id.into_bytes();
-	// if !signers.contains(&current_id) {
-	// 	// if our id is not in it, add our self
-	// 	signers.push(current_id);
-	// 	set_signers(&**client.backend(), signers);
-	// }
-	let bridge = NetworkBridge::new(network, config.clone(), local_peer_id);
-	let streamer = client
-		.clone()
-		.import_notification_stream()
-		.for_each(move |n| {
-			info!(target: "keygen", "HEADER {:?}, looking for consensus message", &n.header);
-			for log in n.header.digest().logs() {
-				info!(target: "keygen", "Checking log {:?}, looking for consensus message", log);
-				match log.try_as_raw(OpaqueDigestItemId::Consensus(&MP_ECDSA_ENGINE_ID)) {
-					Some(data) => {
-						info!("Got log id! {:?}", data);
-						let log_inner = log.try_to::<ConsensusLog>(OpaqueDigestItemId::Consensus(
-							&MP_ECDSA_ENGINE_ID,
-						));
-						info!("Got log inner! {:?}", log_inner);
-						if let Some(log_in) = log_inner {
-							match log_in {
-								RequestForKeygen((id, data)) => {
-									keyclone
-										.read()
-										.initiate_request(&id.to_be_bytes(), ECDSA_SHARED);
-								}
-								_ => {}
-							}
-						}
-					}
-					None => {}
+  // let mut signers = persistent_data.signer_set;
+  // let current_id = current_id.into_bytes();
+  // if !signers.contains(&current_id) {
+  // 	// if our id is not in it, add our self
+  // 	signers.push(current_id);
+  // 	set_signers(&**client.backend(), signers);
+  // }
+  let bridge = NetworkBridge::new(network, config.clone(), local_peer_id);
+  let streamer=client.clone().import_notification_stream().for_each(move |n| {
+		info!(target: "keygen", "HEADER {:?}, looking for consensus message", &n.header);
+	        for log in n.header.digest().logs()
+		{
+		 info!(target: "keygen", "Checking log {:?}, looking for consensus message", log);
+		 match log.try_as_raw(OpaqueDigestItemId::Consensus(&MP_ECDSA_ENGINE_ID))
+		 {
+			Some(data) => {
+				info!("Got log id! {:?}",data);
+		       let log_inner = log.try_to::<ConsensusLog>(OpaqueDigestItemId::Consensus(&MP_ECDSA_ENGINE_ID));
+                info!("Got log inner! {:?}",log_inner);
+				if let Some(log_in)=log_inner
+				{
+		       match log_in
+			   {
+				   RequestForKeygen((id,data)) =>
+				   {
+					  match keyclone.read().initiate_request(&id.to_be_bytes(),ECDSA_SHARED)
+					  {
+						  Ok(_) => {},
+						  Err(e) =>debug!("Error in initiate request: {:?}",&e),
+					  }
+
+				   },
+				   _ =>{}
+			   }
 				}
 				//..ECDSA_SHARED KeyTypeId
 			}

@@ -46,6 +46,7 @@ balances = { package = "srml-balances", path = "../../srml/balances", default-fe
 futures03 = { package = "futures-preview", version = "=0.3.0-alpha.19", features = ["compat"] }
 parking_lot = "0.8.0"
 keygen = { package="substrate-keygen", path = "../../core/keygen" }
+transaction-payment = { package = "srml-transaction-payment", path = "../../srml/transaction-payment" }
 
 [dev-dependencies]
 consensus-common = { package = "substrate-consensus-common", path = "../../core/consensus/common" }

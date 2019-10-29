@@ -29,7 +29,7 @@ network = { package = "substrate-network", path = "../network"}
 keystore = { package = "substrate-keystore", path = "../keystore" }
 service = { package = "substrate-service", path = "../service", optional = true }
 srml-finality-tracker = { path = "../../srml/finality-tracker" }
-fg_primitives = { package = "substrate-badger-primitives", path = "primitives" }
+badger_primitives = { package = "substrate-badger-primitives", path = "primitives" }
 substrate-badger-rapi = { package="substrate-badger-rapi", path="runtime_api"}
 hex = "0.3.2"
 badger = { package= "hbbft", path="../../../hbbft" }
@@ -38,8 +38,8 @@ transaction_pool = { package = "substrate-transaction-pool", path = "../../core/
 num = { package = "num-traits", version = "0.2", default-features = false }
 libp2p = { version = "0.11.0", default-features = false, features = ["secp256k1", "libp2p-websocket"] }
 srml-timestamp = { path = "../../srml/timestamp" }
-
-
+serde_bytes = "0.11"
+derive_more = "0.15"
 
 [dev-dependencies]
 grandpa = { package = "finality-grandpa", version = "0.8.1", features = ["derive-codec", "test-helpers"] }

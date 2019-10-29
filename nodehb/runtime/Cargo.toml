@@ -42,6 +42,7 @@ substrate-keyring = { path = "../../core/keyring", optional = true }
 substrate-session = { path = "../../core/session", default-features = false }
 substrate-badger-rapi = { package="substrate-badger-rapi", path="../../core/hbbft/runtime_api" , default-features = false }
 randomness-collective-flip = { package = "srml-randomness-collective-flip", path = "../../srml/randomness-collective-flip", default_features = false }
+transaction-payment = { package = "srml-transaction-payment", path = "../../srml/transaction-payment", default-features = false }
 
 [build-dependencies]
 wasm-builder-runner = { package = "substrate-wasm-builder-runner", version = "1.0.2", path = "../../core/utils/wasm-builder-runner" }
@@ -81,5 +82,7 @@ std = [
 	"substrate-badger-rapi/std",
 	"srml-badger/std",
 	"srml-keygen/std",
-	"randomness-collective-flip/std"
+	"randomness-collective-flip/std",
+	"transaction-payment/std"
+
 ]

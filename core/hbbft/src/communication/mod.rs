@@ -1,142 +1,75 @@
-// Copyright 2017-2019 Parity Technologies (UK) Ltd.
-// This file is part of Substrate.
-
-// Substrate is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
-// Substrate is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-
-// You should have received a copy of the GNU General Public License
-// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
-
-//! Communication streams for the polite-grandpa networking protocol.
-//!
-//! GRANDPA nodes communicate over a gossip network, where messages are not sent to
-//! peers until they have reached a given round.
-//!
-//! Rather than expressing protocol rules,
-//! polite-grandpa just carries a notion of impoliteness. Nodes which pass some arbitrary
-//! threshold of impoliteness are removed. Messages are either costly, or beneficial.
-//!
-//! For instance, it is _impolite_ to send the same message more than once.
-//! In the future, there will be a fallback for allowing sending the same message
-//! under certain conditions that are used to un-stick the protocol.
-use futures03::core_reexport::marker::PhantomData;
-use hex_fmt::HexFmt;
-//use libp2p::swarm::{PollParameters, Swarm};
-use network::consensus_gossip::MessageIntent;
-use network::consensus_gossip::ValidatorContext;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::convert::TryInto;
+use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
-//use std::time::{Duration, };//Instant
-//use runtime_primitives::traits::NumberFor;
-use ::unsigned_varint::encode;
+
 use badger::dynamic_honey_badger::DynamicHoneyBadger;
 use badger::queueing_honey_badger::QueueingHoneyBadger;
 use badger::sender_queue::{Message as BMessage, SenderQueue};
+use badger::sync_key_gen::{to_pub_keys, PartOutcome, SyncKeyGen};
 use badger::{ConsensusProtocol, CpStep, NetworkInfo, Target};
-use fg_primitives::{PublicKeyWrap, SignatureWrap};
-use network::PeerId;
-use rand::{rngs::OsRng, Rng};
-//use grandpa::{voter, voter_set::VoterSet};
-//use grandpa::Message::{Prevote, Precommit, PrimaryPropose};
-use crate::communication::gossip::GreetingMessage;
 use futures03::channel::{mpsc, oneshot};
 use futures03::prelude::*;
-use log::{debug, info, trace}; // trace};
+use futures03::{task::Context, task::Poll};
+use hex_fmt::HexFmt;
+use log::{debug, info, trace};
+use parity_codec::{Decode, Encode};
+use parking_lot::RwLock;
+use rand::{rngs::OsRng, Rng};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+
+use badger_primitives::AuthorityId;
+pub use badger_primitives::HBBFT_ENGINE_ID;
+use badger_primitives::{PublicKeyWrap, SignatureWrap};
+use gossip::{Action, BadgeredMessage, GossipMessage, GreetingMessage, Peers};
+use network::config::Roles;
+use network::consensus_gossip::MessageIntent;
+use network::consensus_gossip::ValidatorContext;
+use network::PeerId;
 use network::{consensus_gossip as network_gossip, NetworkService};
 use network_gossip::ConsensusMessage;
-use parity_codec::{Decode, Encode};
 use runtime_primitives::traits::{Block as BlockT, Hash as HashT, Header as HeaderT};
 use substrate_telemetry::{telemetry, CONSENSUS_DEBUG};
-
-use libp2p::multihash;
-use libp2p::multihash::Multihash;
-//#[macro_use]
-use ::serde::{Serialize, Deserialize};
-use ::serde::de::DeserializeOwned;
-use fg_primitives::AuthorityId;
-use gossip::Action;
-use gossip::GossipMessage;
-use gossip::Peers;
-//use substrate_primitives::ed25519::{Public as AuthorityId, Signature as AuthoritySignature};
-use network::config::Roles;
 
 pub mod gossip;
 
 use crate::Error;
 
-//const REBROADCAST_AFTER: Duration = Duration::from_secs(60 * 5);
+mod peerid;
+pub use peerid::PeerIdW;
 
-use crate::communication::gossip::BadgeredMessage;
+// #[cfg(test)]
+// mod tests;
 
-#[cfg(test)]
-mod tests;
-pub use fg_primitives::HBBFT_ENGINE_ID;
 //use badger::{SourcedMessage as BSM,  TargetedMessage};
-// cost scalars for reporting peers.
 
-/// A handle to the network. This is generally implemented by providing some
-/// handle to a gossip service or similar.
-///
-/// Intended to be a lightweight handle such as an `Arc`.
 pub trait Network<Block: BlockT>: Clone + Send + 'static
 {
-  /// A stream of input messages for a topic.
   type In: Stream<Item = network_gossip::TopicNotification>;
 
-  /// Get a stream of messages for a specific gossip topic.
   fn messages_for(&self, topic: Block::Hash) -> Self::In;
 
-  /// Register a gossip validator.
   fn register_validator(&self, validator: Arc<dyn network_gossip::Validator<Block>>);
 
-  /// Gossip a message out to all connected peers.
-  ///
-  /// Force causes it to be sent to all peers, even if they've seen it already.
-  /// Only should be used in case of consensus stall.
   fn gossip_message(&self, topic: Block::Hash, data: Vec<u8>, force: bool);
 
-  /// Register a message with the gossip service, it isn't broadcast right
-  /// away to any peers, but may be sent to new peers joining or when asked to
-  /// broadcast the topic. Useful to register previous messages on node
-  /// startup.
   fn register_gossip_message(&self, topic: Block::Hash, data: Vec<u8>);
 
-  /// Send a message to a bunch of specific peers, even if they've seen it already.
   fn send_message(&self, who: Vec<network::PeerId>, data: Vec<u8>);
 
-  /// Report a peer's cost or benefit after some action.
   fn report(&self, who: network::PeerId, cost_benefit: i32);
 
-  /// Inform peers that a block with given hash should be downloaded.
-  fn announce(&self, block: Block::Hash,associated_data: Vec<u8>);
+  fn announce(&self, block: Block::Hash, associated_data: Vec<u8>);
 
   fn local_id(&self) -> PeerId;
-}
-
-/// Create a unique topic for a round and set-id combo.
-pub fn round_topic<B: BlockT>(round: u64, set_id: u64) -> B::Hash
-{
-  <<B::Header as HeaderT>::Hashing as HashT>::hash(format!("{}-{}", set_id, round).as_bytes())
 }
 
 pub fn badger_topic<B: BlockT>() -> B::Hash
 {
   <<B::Header as HeaderT>::Hashing as HashT>::hash(format!("badger-mushroom").as_bytes())
 }
-
-/// Create a unique topic for global messages on a set ID.
-pub fn global_topic<B: BlockT>(set_id: u64) -> B::Hash
-{
-  <<B::Header as HeaderT>::Hashing as HashT>::hash(format!("{}-GLOBAL", set_id).as_bytes())
-}
-use parity_codec::alloc::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub enum LocalTarget
@@ -187,223 +120,19 @@ where
   message: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Hash)]
-pub struct PeerIdW(pub PeerId);
-impl parity_codec::Encode for PeerIdW
-{
-  fn size_hint(&self) -> usize
-  {
-    self.0.as_bytes().len() + 8
-  }
-  fn encode_to<T: parity_codec::Output>(&self, dest: &mut T)
-  {
-    //let len = <C::Affine as CurveAffine>::Compressed::size();
-    let buf = self.0.as_bytes();
-    let len: u64 = buf.len() as u64;
-    dest.push(&len);
-    for bt in buf
-    {
-      dest.push_byte(*bt);
-    }
-  }
-}
-use parity_codec::Input;
-impl parity_codec::Decode for PeerIdW
-{
-  fn decode<I: Input>(value: &mut I) -> Result<Self, parity_codec::Error>
-  {
-    let mut blen: [u8; 8] = [0; 8];
-    match value.read(&mut blen)
-    {
-      Ok(_) =>
-      {}
-      Err(_) => return Err("Error decoding field PeerIdW".into()),
-    };
-    let len: u64 = Decode::decode(&mut blen.to_vec().as_slice()).unwrap();
-    // info!(target:"DECODE","Length: {}",len);
-    let mut mt: Vec<u8> = Vec::with_capacity(len as usize);
-    let mut mlen = len;
-    while mlen > 0
-    {
-      match value.read_byte()
-      {
-        Ok(b) => mt.push(b),
-        Err(e) => return Err(e),
-      }
-      mlen -= 1;
-    }
-    let pw = match PeerId::from_bytes(mt)
-    {
-      Ok(res) => res,
-      Err(_) => return Err("Error decoding field PeerIdW".into()),
-    };
-    Ok(PeerIdW { 0: pw })
-  }
-}
-
-use crate::serde::ser::SerializeSeq;
-use serde::Serializer;
-impl Serialize for PeerIdW
-{
-  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-  where
-    S: Serializer,
-  {
-    let e = self.0.as_bytes();
-
-    let mut seq = serializer.serialize_seq(Some(e.len()))?;
-    for s in e
-    {
-      seq.serialize_element(s)?;
-    }
-    seq.end()
-  }
-}
-
-struct PeerIdVisitor;
-use crate::serde::de::Error as SerdeError;
-use serde::de::Deserializer;
-use serde::de::SeqAccess;
-use serde::de::Visitor;
-use std::fmt;
-
-impl<'de> Visitor<'de> for PeerIdVisitor
-{
-  // The type that our Visitor is going to produce.
-  type Value = PeerIdW;
-
-  // Format a message stating what data this Visitor expects to receive.
-  fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result
-  {
-    formatter.write_str("sequence of bytes in PeerId shape")
-  }
-
-  // Deserialize MyMap from an abstract "map" provided by the
-  // Deserializer. The MapAccess input is a callback provided by
-  // the Deserializer to let us see each entry in the map.
-  fn visit_seq<M>(self, mut access: M) -> Result<Self::Value, M::Error>
-  where
-    M: SeqAccess<'de>,
-  {
-    let mut buf = Vec::<u8>::with_capacity(access.size_hint().unwrap_or(0));
-
-    // While there are entries remaining in the input, add them
-    // into our map.
-    while let Some(value) = access.next_element()?
-    {
-      buf.push(value)
-    }
-    match PeerId::from_bytes(buf)
-    {
-      Ok(res) => Ok(PeerIdW { 0: res }),
-      Err(_) => Err(M::Error::custom("Peerid frombytes failed")),
-    }
-  }
-}
-impl<'de> Deserialize<'de> for PeerIdW
-{
-  fn deserialize<D>(deserializer: D) -> Result<PeerIdW, D::Error>
-  where
-    D: Deserializer<'de>,
-  {
-    deserializer.deserialize_seq(PeerIdVisitor)
-  }
-}
-
 impl rand::distributions::Distribution<PeerIdW> for rand::distributions::Standard
 {
-  fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PeerIdW
+  fn sample<R: Rng + ?Sized>(&self, _rng: &mut R) -> PeerIdW
   {
-    let hash = multihash::Hash::SHA2256;
-    let mut buf = encode::u16_buffer();
-    let code = encode::u16(hash.code(), &mut buf);
-
-    let header_len = code.len() + 1;
-    let size = hash.size();
-
-    let mut output = Vec::new();
-    output.resize(header_len + size as usize, 0);
-    output[..code.len()].copy_from_slice(code);
-    output[code.len()] = size;
-
-    for b in output[header_len..].iter_mut()
-    {
-      *b = rng.gen();
-    }
-
-    let mhash = Multihash::from_bytes(output).unwrap();
-    PeerIdW {
-      0: PeerId::from_multihash(mhash).unwrap(),
-    }
+    PeerIdW(PeerId::random())
   }
 }
 
-use std::convert::TryInto;
 impl rand::distributions::Distribution<PeerIdW> for PeerIdW
 {
-  fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PeerIdW
+  fn sample<R: Rng + ?Sized>(&self, _rng: &mut R) -> PeerIdW
   {
-    let hash = multihash::Hash::SHA2256;
-    let mut buf = encode::u16_buffer();
-    let code = encode::u16(hash.code(), &mut buf);
-
-    let header_len = code.len() + 1;
-    let size = hash.size();
-
-    let mut output = Vec::new();
-    output.resize(header_len + size as usize, 0);
-    output[..code.len()].copy_from_slice(code);
-    output[code.len()] = size;
-
-    for b in output[header_len..].iter_mut()
-    {
-      *b = rng.gen();
-    }
-    let mhash = Multihash::from_bytes(output).unwrap();
-    PeerIdW {
-      0: PeerId::from_multihash(mhash).unwrap(),
-    }
-  }
-}
-
-impl From<PeerId> for PeerIdW
-{
-  fn from(id: PeerId) -> Self
-  {
-    PeerIdW(id)
-  }
-}
-
-impl Into<PeerId> for PeerIdW
-{
-  fn into(self) -> PeerId
-  {
-    self.0
-  }
-}
-impl std::cmp::PartialOrd for PeerIdW
-{
-  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering>
-  {
-    Some(self.cmp(other))
-  }
-}
-
-impl std::cmp::PartialEq for PeerIdW
-{
-  fn eq(&self, other: &Self) -> bool
-  {
-    self.0 == other.0
-  }
-}
-
-impl std::cmp::Eq for PeerIdW {}
-
-impl std::cmp::Ord for PeerIdW
-{
-  fn cmp(&self, other: &Self) -> std::cmp::Ordering
-  {
-    self.0.to_base58().cmp(&other.0.to_base58())
+    PeerIdW(PeerId::random())
   }
 }
 
@@ -415,11 +144,8 @@ where
   D: ConsensusProtocol<NodeId = PeerIdW>, //specialize to avoid some of the confusion
   D::Message: Serialize + DeserializeOwned,
 {
-  /// This node's own ID.
   id: PeerId,
-  /// The instance of the broadcast algorithm.
   algo: D,
-
   main_rng: OsRng,
 
   peers: Peers,
@@ -427,28 +153,31 @@ where
   config: crate::Config,
   //next_rebroadcast: Instant,
   /// Incoming messages from other nodes that this node has not yet handled.
- // in_queue: VecDeque<SourcedMessage<D>>,
+  // in_queue: VecDeque<SourcedMessage<D>>,
   /// Outgoing messages to other nodes.
   out_queue: VecDeque<SourcedMessage<D>>,
   /// The values this node has output so far, with timestamps.
   outputs: VecDeque<D::Output>,
-  phantom: PhantomData<B>,
+  _block: PhantomData<B>,
 }
+
 impl<B: BlockT> BadgerNode<B, QHB>
 {
   fn push_transaction(
-    &mut self, tx: Vec<u8>,
+    &mut self,
+    tx: Vec<u8>,
   ) -> Result<CpStep<QHB>, badger::sender_queue::Error<badger::queueing_honey_badger::Error>>
   {
-    info!("BaDGER pushing transaction {:?}",&tx);
+    info!("BaDGER pushing transaction {:?}", &tx);
     let ret = self.algo.push_transaction(tx, &mut self.main_rng);
     info!("BaDGER pushed: complete ");
     ret
   }
 }
+
 impl<B: BlockT, D: ConsensusProtocol<NodeId = PeerIdW>> BadgerNode<B, D>
 where
-  D::Message: serde::Serialize + DeserializeOwned,
+  D::Message: Serialize + DeserializeOwned,
 {
   fn register_peer_public_key(&mut self, who: &PeerId, auth: AuthorityId)
   {
@@ -488,7 +217,7 @@ pub type BadgerNodeStepResult<D> = CpStep<D>;
 pub type TransactionSet = Vec<Vec<u8>>; //agnostic?
 impl<B: BlockT, D: ConsensusProtocol<NodeId = PeerIdW>> BadgerNode<B, D>
 where
-  D::Message: serde::Serialize + DeserializeOwned,
+  D::Message: Serialize + DeserializeOwned,
 {
   pub fn new(config: crate::Config, self_id: PeerId) -> BadgerNode<B, QHB>
   {
@@ -560,7 +289,7 @@ where
       //in_queue: VecDeque::new(),
       out_queue: out_queue,
       outputs: outputs,
-      phantom: PhantomData,
+      _block: PhantomData,
     };
     for (k, v) in config.initial_validators.clone()
     {
@@ -572,7 +301,7 @@ where
 
   pub fn handle_message(&mut self, who: &PeerIdW, msg: D::Message) -> Result<(), &'static str>
   {
-    info!("BaDGER!! Handling message from {} {:?}", who.0, &msg);
+    debug!("BaDGER!! Handling message from {} {:?}", who.0, &msg);
     match self.algo.handle_message(who, msg, &mut self.main_rng)
     {
       Ok(step) =>
@@ -581,13 +310,13 @@ where
           .messages
           .into_iter()
           .map(|mmsg| {
-            info!("BaDGER!! Hundling  {:?} ", &mmsg.message);
+            debug!("BaDGER!! Hundling  {:?} ", &mmsg.message);
             let ser_msg = bincode::serialize(&mmsg.message).expect("serialize");
             (mmsg.target, ser_msg)
           })
           .collect();
         self.outputs.extend(step.output.into_iter());
-        info!(
+        debug!(
           "BaDGER!! OK message from {}, {} ",
           who.0,
           self.outputs.len()
@@ -607,16 +336,18 @@ where
     }
   }
 }
-use parity_codec::alloc::collections::BTreeMap;
 pub struct BadgerGossipValidator<Block: BlockT>
 {
-  inner: parking_lot::RwLock<BadgerNode<Block, QHB>>,
-  pending_messages: parking_lot::RwLock<BTreeMap<PeerIdW, Vec<Vec<u8>>>>,
+  inner: RwLock<BadgerNode<Block, QHB>>,
+  pending_messages: RwLock<BTreeMap<PeerIdW, Vec<Vec<u8>>>>,
 }
 impl<Block: BlockT> BadgerGossipValidator<Block>
 {
   fn send_message_either<N: Network<Block>>(
-    &self, who: PeerId, vdata: Vec<u8>, context_net: Option<&N>,
+    &self,
+    who: PeerId,
+    vdata: Vec<u8>,
+    context_net: Option<&N>,
     context_val: &mut Option<&mut dyn ValidatorContext<Block>>,
   )
   {
@@ -632,12 +363,14 @@ impl<Block: BlockT> BadgerGossipValidator<Block>
   }
 
   fn flush_message_either<N: Network<Block>>(
-    &self, context_net: Option<&N>, context_val: &mut Option<&mut dyn ValidatorContext<Block>>,
+    &self,
+    context_net: Option<&N>,
+    context_val: &mut Option<&mut dyn ValidatorContext<Block>>,
   )
   {
-   // let topic = badger_topic::<Block>();
-    let  sid: PeerId;
-    let  drain: Vec<_>;
+    // let topic = badger_topic::<Block>();
+    let sid: PeerId;
+    let drain: Vec<_>;
     {
       let mut locked = self.inner.write();
       sid = locked.id.clone();
@@ -680,7 +413,7 @@ impl<Block: BlockT> BadgerGossipValidator<Block>
       {
         LocalTarget::Nodes(node_set) =>
         {
-          let  inner = self.inner.write();
+          let inner = self.inner.write();
           let av_list = inner.peers.connected_peer_list();
           for to_id in node_set.iter()
           {
@@ -701,7 +434,7 @@ impl<Block: BlockT> BadgerGossipValidator<Block>
         LocalTarget::AllExcept(exclude) =>
         {
           debug!("BaDGER!! AllExcept  {}", exclude.len());
-          let  locked = self.inner.write();
+          let locked = self.inner.write();
           let mut vallist: Vec<_> = locked
             .config
             .initial_validators
@@ -739,20 +472,18 @@ impl<Block: BlockT> BadgerGossipValidator<Block>
     debug!("BaDGER!! Exit flush");
   }
   /// Create a new gossip-validator.
-  pub fn new(config: crate::Config, self_id: PeerId) -> BadgerGossipValidator<Block>
+  pub fn new(config: crate::Config, self_id: PeerId) -> Self
   {
-    let val = BadgerGossipValidator {
-      inner: parking_lot::RwLock::new(BadgerNode::<Block, QHB>::new(config, self_id)),
-      pending_messages: parking_lot::RwLock::new(BTreeMap::new()),
-    };
-
-    val
+    Self {
+      inner: RwLock::new(BadgerNode::<Block, QHB>::new(config, self_id)),
+      pending_messages: RwLock::new(BTreeMap::new()),
+    }
   }
   /// collect outputs from
   pub fn pop_output(&self) -> Option<<QHB as ConsensusProtocol>::Output>
   {
     let mut locked = self.inner.write();
-    info!("OUTPUTS: {:?}",locked.outputs.len());
+    info!("OUTPUTS: {:?}", locked.outputs.len());
     locked.outputs.pop_front()
   }
 
@@ -761,9 +492,10 @@ impl<Block: BlockT> BadgerGossipValidator<Block>
     let rd = self.inner.read();
     rd.is_authority(&rd.id)
   }
+
   pub fn push_transaction<N: Network<Block>>(&self, tx: Vec<u8>, net: &N) -> Result<(), Error>
   {
-    let  do_flush;
+    let do_flush;
     {
       let mut locked = self.inner.write();
       do_flush = match locked.push_transaction(tx)
@@ -807,7 +539,9 @@ impl<Block: BlockT> BadgerGossipValidator<Block>
   }
 
   pub fn do_validate(
-    &self, who: &PeerId, mut data: &[u8],
+    &self,
+    who: &PeerId,
+    mut data: &[u8],
   ) -> (Action<Block::Hash>, Option<GossipMessage>)
   {
     let mut peer_reply = None;
@@ -828,17 +562,17 @@ impl<Block: BlockT> BadgerGossipValidator<Block>
             );
             if let Some(_) = msg.my_pubshare
             {
-              //self.inner.write().register_peer_public_key(who,share);
+              //self.inner.write().register_peer_public_key(who,share); TODO : maybe fix?
             }
             let mut inner = self.inner.write();
             inner
               .peers
               .update_peer_state(who, PeerConsensusState::GreetingReceived);
-            Action::Keep()
+            Action::Keep
           }
           else
           {
-            Action::Discard(-1)
+            Action::Discard
           }
         }
         Ok(GossipMessage::RequestGreeting) =>
@@ -866,7 +600,7 @@ impl<Block: BlockT> BadgerGossipValidator<Block>
             },
           };
           peer_reply = Some(GossipMessage::Greeting(msrep));
-          Action::ProcessAndDiscard()
+          Action::ProcessAndDiscard
         }
         Ok(GossipMessage::BadgerData(badger_msg)) =>
         {
@@ -888,33 +622,33 @@ impl<Block: BlockT> BadgerGossipValidator<Block>
                 {
                   //send is handled separately. trigger propose? or leave it for stream
                   debug!("BadGER: decoded gossip message");
-                  Action::ProcessAndDiscard()
+                  Action::ProcessAndDiscard
                 }
                 Err(e) =>
                 {
                   telemetry!(CONSENSUS_DEBUG; "afg.err_handling_msg"; "err" => ?format!("{}", e));
-                  Action::Discard(-1)
+                  Action::Discard
                 }
               }
             }
             else
             {
-              Action::Discard(-1)
+              Action::Discard
             }
           }
           else
           {
-            Action::Discard(-1)
+            Action::Discard
           }
         }
+        Ok(GossipMessage::KeygenData(keygen_msg)) => Action::Discard,
 
         Err(e) =>
         {
           info!(target: "afg", "Error decoding message {:?}",e);
           telemetry!(CONSENSUS_DEBUG; "afg.err_decoding_msg"; "" => "");
 
-          let len = std::cmp::min(i32::max_value() as usize, data.len()) as i32;
-          Action::Discard(-len)
+          Action::Discard
         }
       }
     };
@@ -936,26 +670,25 @@ impl<Block: BlockT> network_gossip::Validator<Block> for BadgerGossipValidator<B
         .update_peer_state(who, PeerConsensusState::Connected);
     };
     let packet = {
-      let  inner = self.inner.write();
+      let inner = self.inner.write();
       //inner.peers.new_peer(who.clone());
       GreetingMessage {
-        my_pubshare: match inner.config.initial_validators.get(&PeerIdW {
-          0: inner.id.clone(),
-        })
+        my_pubshare: match inner
+          .config
+          .initial_validators
+          .get(&PeerIdW::from(inner.id.clone()))
         {
-          Some(val) => Some(PublicKeyWrap { 0: val.clone() }),
+          Some(val) => Some(PublicKeyWrap(val.clone())),
           None => None,
         },
-        my_id: PublicKeyWrap {
-          0: inner.config.node_id.0,
-        },
-        my_sig: SignatureWrap {
-          0: inner
+        my_id: PublicKeyWrap(inner.config.node_id.0),
+        my_sig: SignatureWrap(
+          inner
             .config
             .node_id
             .1
             .sign(inner.config.node_id.0.clone().to_bytes().to_vec()),
-        },
+        ),
       }
     };
 
@@ -971,7 +704,10 @@ impl<Block: BlockT> network_gossip::Validator<Block> for BadgerGossipValidator<B
   }
 
   fn validate(
-    &self, context: &mut dyn ValidatorContext<Block>, who: &PeerId, data: &[u8],
+    &self,
+    context: &mut dyn ValidatorContext<Block>,
+    who: &PeerId,
+    data: &[u8],
   ) -> network_gossip::ValidationResult<Block::Hash>
   {
     let (action, peer_reply) = self.do_validate(who, data);
@@ -989,13 +725,13 @@ impl<Block: BlockT> network_gossip::Validator<Block> for BadgerGossipValidator<B
 
     match action
     {
-      Action::Keep() =>
+      Action::Keep =>
       {
         context.broadcast_message(topic, data.to_vec(), false);
         network_gossip::ValidationResult::ProcessAndKeep(topic)
       }
-      Action::ProcessAndDiscard() => network_gossip::ValidationResult::ProcessAndDiscard(topic),
-      Action::Discard(_cb) =>
+      Action::ProcessAndDiscard => network_gossip::ValidationResult::ProcessAndDiscard(topic),
+      Action::Discard =>
       {
         //self.report(who.clone(), cb);
         network_gossip::ValidationResult::Discard
@@ -1049,6 +785,7 @@ impl<Block: BlockT> network_gossip::Validator<Block> for BadgerGossipValidator<B
       {
         Err(_) => false,
         Ok(GossipMessage::BadgerData(_)) => return false,
+        Ok(GossipMessage::KeygenData(_)) => return false,
         Ok(GossipMessage::Greeting(_)) => true,
         Ok(GossipMessage::RequestGreeting) => false,
       }
@@ -1092,8 +829,7 @@ where
 
   fn messages_for(&self, _topic: B::Hash) -> Self::In
   {
-    let (_tx, rx) =
-      futures03::channel::oneshot::channel::<futures03::channel::mpsc::UnboundedReceiver<_>>();
+    let (_tx, rx) = oneshot::channel::<mpsc::UnboundedReceiver<_>>();
     NetworkStream {
       outer: rx,
       inner: None,
@@ -1110,7 +846,7 @@ where
 
   fn report(&self, _who: network::PeerId, _cost_benefit: i32) {}
 
-  fn announce(&self, _block: B::Hash,_data:Vec<u8>) {}
+  fn announce(&self, _block: B::Hash, _data: Vec<u8>) {}
 }
 
 impl<B, S, H> Network<B> for Arc<NetworkService<B, S, H>>
@@ -1127,8 +863,7 @@ where
 
   fn messages_for(&self, topic: B::Hash) -> Self::In
   {
-    let (tx, rx) =
-      futures03::channel::oneshot::channel::<futures03::channel::mpsc::UnboundedReceiver<_>>();
+    let (tx, rx) = oneshot::channel::<mpsc::UnboundedReceiver<_>>();
     self.with_gossip(move |gossip, _| {
       let inner_rx = gossip.messages_for(HBBFT_ENGINE_ID, topic);
       let _ = tx.send(inner_rx);
@@ -1186,10 +921,10 @@ where
     self.report_peer(who, cost_benefit)
   }
 
-  fn announce(&self, block: B::Hash,associated_data: Vec<u8>)
+  fn announce(&self, block: B::Hash, associated_data: Vec<u8>)
   {
     info!("Announcing block!");
-    self.announce_block(block,associated_data)
+    self.announce_block(block, associated_data)
   }
 }
 
@@ -1197,12 +932,8 @@ where
 pub struct NetworkStream
 {
   inner: Option<mpsc::UnboundedReceiver<network_gossip::TopicNotification>>,
-  outer: oneshot::Receiver<
-    futures03::channel::mpsc::UnboundedReceiver<network_gossip::TopicNotification>,
-  >,
+  outer: oneshot::Receiver<mpsc::UnboundedReceiver<network_gossip::TopicNotification>>,
 }
-use std::pin::Pin;
-use futures03::{ task::Context, task::Poll};
 
 impl Stream for NetworkStream
 {
@@ -1214,9 +945,9 @@ impl Stream for NetworkStream
     {
       match inner.try_next()
       {
-        Ok(Some(opt)) => return futures03::Poll::Ready(Some(opt)),
-        Ok(None) => return futures03::Poll::Pending,
-        Err(_) => return futures03::Poll::Pending,
+        Ok(Some(opt)) => return Poll::Ready(Some(opt)),
+        Ok(None) => return Poll::Pending,
+        Err(_) => return Poll::Pending,
       };
     }
     match self.outer.try_recv()
@@ -1225,15 +956,15 @@ impl Stream for NetworkStream
       {
         let poll_result = match inner.try_next()
         {
-          Ok(Some(opt)) => futures03::Poll::Ready(Some(opt)),
-          Ok(None) => futures03::Poll::Pending,
-          Err(_) => futures03::Poll::Pending,
+          Ok(Some(opt)) => Poll::Ready(Some(opt)),
+          Ok(None) => Poll::Pending,
+          Err(_) => Poll::Pending,
         };
         self.inner = Some(inner);
         poll_result
       }
-      Ok(None) => futures03::Poll::Pending,
-      Err(_) => futures03::Poll::Pending,
+      Ok(None) => Poll::Pending,
+      Err(_) => Poll::Pending,
     }
   }
 }
@@ -1252,7 +983,8 @@ impl<B: BlockT, N: Network<B>> NetworkBridge<B, N>
   /// If a voter set state is given it registers previous round votes with the
   /// gossip service.
   pub fn new(
-    service: N, config: crate::Config,
+    service: N,
+    config: crate::Config,
   ) -> (
     Self,
     impl futures03::future::Future<Output = ()> + Send + Unpin,
@@ -1285,14 +1017,13 @@ impl<B: BlockT, N: Network<B>> NetworkBridge<B, N>
 
   /// Set up the global communication streams. blocks out transaction in. Maybe reverse of grandpa...
   pub fn global_communication(
-    &self, is_voter: bool,
+    &self,
+    is_voter: bool,
   ) -> (
     impl Stream<Item = <QHB as ConsensusProtocol>::Output>,
     impl SendOut,
   )
   {
-    //let service = self.service.clone();
-    //let topic = badger_topic::<B>();
     let incoming = incoming_global::<B, N>(self.node.clone());
 
     let outgoing = TransactionFeed::<B, N>::new(self.service.clone(), is_voter, self.node.clone());
@@ -1352,23 +1083,25 @@ impl<Block: BlockT> Stream for BadgerStream<Block>
 struct TransactionFeed<Block: BlockT, N: Network<Block>>
 {
   network: N,
-  //is_voter: bool,
   gossip_validator: Arc<BadgerGossipValidator<Block>>,
 }
+
 pub trait SendOut
 {
   fn send_out(&mut self, input: Vec<Vec<u8>>) -> Result<(), Error>;
 }
+
 impl<Block: BlockT, N: Network<Block>> TransactionFeed<Block, N>
 {
-  /// Create a new commit output stream.
   pub fn new(
-    network: N, _is_voter: bool, gossip_validator: Arc<BadgerGossipValidator<Block>>,
+    network: N,
+    _is_voter: bool,
+    gossip_validator: Arc<BadgerGossipValidator<Block>>,
   ) -> Self
   {
     TransactionFeed {
       network,
-     // is_voter,
+      // is_voter,
       gossip_validator,
     }
   }
@@ -1403,13 +1136,11 @@ struct NetworkSubtext<'g, 'p, B: BlockT>
 
 impl<'g, 'p, B: BlockT> ValidatorContext<B> for NetworkSubtext<'g, 'p, B>
 {
-  /// Broadcast all messages with given topic to peers that do not have it yet.
   fn broadcast_topic(&mut self, topic: B::Hash, force: bool)
   {
     self.gossip.broadcast_topic(self.protocol, topic, force);
   }
 
-  /// Broadcast a message to all peers that have not received it previously.
   fn broadcast_message(&mut self, topic: B::Hash, message: Vec<u8>, force: bool)
   {
     info!("mcast");
@@ -1424,7 +1155,6 @@ impl<'g, 'p, B: BlockT> ValidatorContext<B> for NetworkSubtext<'g, 'p, B>
     );
   }
 
-  /// Send addressed message to a peer.
   fn send_message(&mut self, who: &PeerId, message: Vec<u8>)
   {
     self.protocol.send_consensus(
@@ -1436,7 +1166,6 @@ impl<'g, 'p, B: BlockT> ValidatorContext<B> for NetworkSubtext<'g, 'p, B>
     );
   }
 
-  /// Send all messages with given topic to a peer.
   fn send_topic(&mut self, who: &PeerId, topic: B::Hash, force: bool)
   {
     self
@@ -1468,10 +1197,12 @@ impl<Block: BlockT, N: Network<Block>> Sink<Vec<Vec<u8>>> for TransactionFeed<Bl
     }
     Ok(())
   }
+
   fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Result<(), Self::Error>>
   {
     Poll::Ready(Ok(()))
   }
+
   fn poll_close(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Result<(), Self::Error>>
   {
     Poll::Ready(Ok(()))

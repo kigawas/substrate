@@ -29,7 +29,7 @@ use hb_node_primitives::{
 	AccountId, AccountIndex, Balance, BlockNumber, Hash, Index,
 	Moment, Signature,ContractExecResult,
 };
-//use substrate_badger_rapi::HbbftApi;
+use substrate_badger_rapi::app::Public as BadgerId;
 pub use contracts;
 pub use contracts::Gas;
 pub use srml_keygen::sr25519::AuthorityId as KeygenId;
@@ -39,7 +39,7 @@ use client::{
 	block_builder::api::{self as block_builder_api, InherentData, CheckInherentsResult},
 	runtime_api as client_api, impl_runtime_apis
 };
-use sr_primitives::{ApplyResult,  generic, create_runtime_str, };//key_types
+use sr_primitives::{ApplyResult,  generic, create_runtime_str,impl_opaque_keys,key_types  };//key_types
 use sr_primitives::transaction_validity::TransactionValidity;
 use sr_primitives::weights::Weight;
 use sr_primitives::traits::{
@@ -61,7 +61,7 @@ pub use support::StorageValue;
 
 /// Implementations of some helper traits passed into runtime modules as associated types.
 pub mod impls;
-use impls::{WeightMultiplierUpdateHandler,  WeightToFee}; //CurrencyToVoteHandler 
+use impls::{ WeightToFee}; //CurrencyToVoteHandler 
 
 /// Constant values used within the runtime.
 pub mod constants;
@@ -96,6 +96,15 @@ pub fn native_version() -> NativeVersion {
 
 type NegativeImbalance = <Balances as Currency<AccountId>>::NegativeImbalance;
 
+	pub type SessionHandlers = (Badger,);
+
+	impl_opaque_keys! {
+		pub struct SessionKeys {
+			#[id(key_types::HB_NODE)]
+			pub hbbft: BadgerId,
+		}
+	}
+
 
 parameter_types! {
 	pub const BlockHashCount: BlockNumber = 250;
@@ -115,7 +124,6 @@ impl system::Trait for Runtime {
 	type AccountId = AccountId;
 	type Lookup = Indices;
 	type Header = generic::Header<BlockNumber, BlakeTwo256>;
-	type WeightMultiplierUpdate = WeightMultiplierUpdateHandler;
 	type Event = Event;
 	type BlockHashCount = BlockHashCount;
 	type MaximumBlockWeight = MaximumBlockWeight;
@@ -182,19 +190,19 @@ parameter_types! {
 }
 
 impl balances::Trait for Runtime {
+	/// The type for recording an account's balance.
 	type Balance = Balance;
+	/// What to do if an account's free balance gets zeroed.
 	type OnFreeBalanceZero = ();
+	/// What to do if a new account is created.
 	type OnNewAccount = Indices;
+	/// The ubiquitous event type.
 	type Event = Event;
-	type TransactionPayment = ();
 	type DustRemoval = ();
 	type TransferPayment = ();
 	type ExistentialDeposit = ExistentialDeposit;
 	type TransferFee = TransferFee;
 	type CreationFee = CreationFee;
-	type TransactionBaseFee = TransactionBaseFee;
-	type TransactionByteFee = TransactionByteFee;
-	type WeightToFee = WeightToFee;
 }
 
 parameter_types! {
@@ -308,7 +316,7 @@ construct_runtime!(
 		Timestamp: timestamp::{Module, Call, Storage, Inherent},
 		Authorship: authorship::{Module, Call, Storage, Inherent},
 		Badger: srml_badger::{Module, Call, Storage, Event},
-		Keygen: srml_keygen::{Module, Call, Storage, Event},
+		Keygen: srml_keygen::{Module, Call, Storage, Event,ValidateUnsigned},
 		Indices: indices,
 		Balances: balances,
 		Contracts: contracts,
@@ -317,6 +325,15 @@ construct_runtime!(
 		Sudo: sudo,
 	}
 );
+
+impl transaction_payment::Trait for Runtime {
+	type Currency = Balances;
+	type OnTransactionPayment = ();
+	type TransactionBaseFee = TransactionBaseFee;
+	type TransactionByteFee = TransactionByteFee;
+	type WeightToFee = WeightToFee;
+	type FeeMultiplierUpdate = impls::FeeMultiplierUpdateHandler;
+}
 
 /// The address format for describing accounts.
 pub type Address = <Indices as StaticLookup>::Source;
@@ -335,9 +352,8 @@ pub type SignedExtra = (
 	system::CheckEra<Runtime>,
 	system::CheckNonce<Runtime>,
 	system::CheckWeight<Runtime>,
-	balances::TakeFees<Runtime>,
+	transaction_payment::ChargeTransactionPayment<Runtime>,
 	contracts::CheckBlockGasLimit<Runtime>,
-				
 );
 /// Unchecked extrinsic type as expected by this runtime.
 pub type UncheckedExtrinsic = generic::UncheckedExtrinsic<Address, Call, Signature, SignedExtra>;
@@ -405,8 +421,9 @@ impl_runtime_apis! {
 
 	impl substrate_session::SessionKeys<Block> for Runtime {
 		fn generate_session_keys(seed: Option<Vec<u8>>) -> Vec<u8> {
-			let _seed = seed.as_ref().map(|s| rstd::str::from_utf8(&s).expect("Seed is an utf8 string"));
-			Vec::new()
+			let seed = seed.as_ref().map(|s| rstd::str::from_utf8(&s).expect("Seed is an utf8 string"));
+			//Vec::new()
+			SessionKeys::generate(seed)
 		}
 	}
 

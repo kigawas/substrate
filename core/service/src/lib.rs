@@ -253,7 +253,6 @@ macro_rules! new_impl {
 						).map_err(|e| warn!("Pool error processing new block: {:?}", e))?;
 						let _ = to_spawn_tx_.unbounded_send(future);
 					}
-
 					let offchain = offchain.as_ref().and_then(|o| o.upgrade());
 					if let (Some(txpool), Some(offchain)) = (txpool, offchain) {
 						let future = $offchain_workers(
