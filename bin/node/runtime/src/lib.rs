@@ -376,8 +376,8 @@ parameter_types! {
 	pub const ContractTransactionByteFee: Balance = 10 * MILLICENTS;
 	pub const ContractFee: Balance = 1 * CENTS;
 	pub const TombstoneDeposit: Balance = 1 * DOLLARS;
-	pub const RentByteFee: Balance = 1 * DOLLARS;
-	pub const RentDepositOffset: Balance = 1000 * DOLLARS;
+	pub const RentByteFee: Balance = 1 * CENTS;
+	pub const RentDepositOffset: Balance = 1 * DOLLARS;
 	pub const SurchargeReward: Balance = 150 * DOLLARS;
 }
 

@@ -377,7 +377,7 @@ decl_module! {
 
 		/// Mints an asset, increases its total issuance.
 		/// The origin must have `mint` permissions.
-		fn mint(origin, #[compact] asset_id: T::AssetId, to: T::AccountId, amount: T::Balance) -> Result {
+		pub fn mint(origin, #[compact] asset_id: T::AssetId, to: T::AccountId, amount: T::Balance) -> Result {
 			let origin = ensure_signed(origin)?;
 			if Self::check_permission(&asset_id, &origin, &PermissionType::Mint) {
 				let original_free_balance = Self::free_balance(&asset_id, &to);
