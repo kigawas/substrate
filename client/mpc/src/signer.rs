@@ -179,8 +179,10 @@ where
 		);
 
 		if res.is_err() {
-			println!("{:?} \n {:?} \n {:?}", secret_shares, vsss, res);
-			panic!("ss error of {:?}", key.party_index);
+			println!(
+				"generate key error at {:?}:\n{:?} \n {:?} \n {:?}",
+				key.party_index, secret_shares, vsss, res
+			);
 			return;
 		}
 

@@ -223,8 +223,9 @@ impl<Block: BlockT> sc_network_gossip::Validator<Block> for GossipValidator<Bloc
 	) -> ValidationResult<Block::Hash> {
 		let gossip_msg = GossipMessage::decode(&mut data);
 		if let Ok(gossip_msg) = gossip_msg {
-			let req_id = gossip_msg.get_req_id();
-			let topic = super::bytes_topic::<Block>(&req_id.to_le_bytes());
+			// let req_id = gossip_msg.get_req_id();
+			// println!("{:?} req_id: {:?}", who, req_id);
+			let topic = super::bytes_topic::<Block>(b"mpc");
 			return ValidationResult::ProcessAndKeep(topic);
 		}
 		ValidationResult::Discard
@@ -247,8 +248,8 @@ impl<Block: BlockT> sc_network_gossip::Validator<Block> for GossipValidator<Bloc
 			(RwLockWriteGuard::downgrade(inner), do_rebroadcast)
 		};
 
-		Box::new(move |who, intent, _topic, mut data| {
-			println!("In `message_allowed` rebroadcast: {:?}", do_rebroadcast);
+		Box::new(move |_who, intent, _topic, mut data| {
+			println!("In `message_allowed` of {:?} rebroadcast: {:?}", _who, do_rebroadcast);
 
 			if let MessageIntent::PeriodicRebroadcast = intent {
 				return do_rebroadcast;
@@ -257,10 +258,6 @@ impl<Block: BlockT> sc_network_gossip::Validator<Block> for GossipValidator<Bloc
 			let players = inner.config.players as usize;
 			if inner.peers.len() < players {
 				return true;
-			}
-
-			if !inner.peers.contains_peer_id(&who) {
-				return false;
 			}
 
 			let gossip_msg = GossipMessage::decode(&mut data);
@@ -278,7 +275,7 @@ impl<Block: BlockT> sc_network_gossip::Validator<Block> for GossipValidator<Bloc
 						let is_valid = is_awaiting_peers || is_generating;
 						return is_valid && our_hash == all_peers_hash;
 					}
-					_ => return false,
+					GossipMessage::SigGen(_, _) => return true,
 				}
 			}
 			false

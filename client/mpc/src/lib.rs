@@ -315,7 +315,7 @@ where
 
 	let streamer = client.clone().import_notification_stream().for_each(move |n| {
 		let logs = n.header.digest().logs().iter();
-		if n.header.number() == &5.into() {
+		if n.header.number() == &3.into() {
 			// temp workaround since cannot use polkadot js now
 			let _ = tx.unbounded_send(MpcRequest::KeyGen(1));
 		}

@@ -111,7 +111,7 @@ where
 		impl Stream<Item = MessageWithSender>,
 		impl Sink<MessageWithReceiver, Error = Error>,
 	) {
-		let topic = bytes_topic::<B>(b"hash"); // related with `fn validate` in gossip.rs
+		let topic = bytes_topic::<B>(b"mpc"); // related with `fn validate` in gossip.rs
 
 		let incoming = self.gossip_engine.messages_for(topic).filter_map(|notification| async {
 			let decoded = GossipMessage::decode(&mut &notification.message[..]);
@@ -131,6 +131,7 @@ where
 	}
 
 	pub fn start_key_gen(&self, _id: RequestId) {
+		println!("start key gen");
 		let inner = self.validator.inner.read();
 
 		let all_peers_len = inner.get_peers_len();
