@@ -1,15 +1,12 @@
 use std::{
-	collections::VecDeque,
 	marker::PhantomData,
-	str::FromStr,
 	time::{Duration, Instant},
 };
 
 use codec::{Decode, Encode};
-use log::{error, info, trace, warn};
 
 use sc_network::{config::Roles, PeerId};
-use sc_network_gossip::{GossipEngine, MessageIntent, ValidationResult, ValidatorContext};
+use sc_network_gossip::{MessageIntent, ValidationResult, ValidatorContext};
 use sp_runtime::traits::Block as BlockT;
 
 use super::{
@@ -20,21 +17,26 @@ use crate::NodeConfig;
 
 const REBROADCAST_AFTER: Duration = Duration::from_secs(30);
 
-pub type RequestId = u64;
+#[derive(Debug, Clone, Copy, Encode, Decode, PartialEq)]
+// extra data for message
+pub struct GossipEra {
+	pub req_id: u64,
+	pub peers_hash: u64,
+}
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq)]
 pub enum GossipMessage {
-	ConfirmPeers(ConfirmPeersMessage, RequestId),
-	KeyGen(KeyGenMessage, RequestId),
-	SigGen(SigGenMessage, RequestId),
+	ConfirmPeers(ConfirmPeersMessage, GossipEra),
+	KeyGen(KeyGenMessage, GossipEra),
+	SigGen(SigGenMessage, GossipEra),
 }
 
 impl GossipMessage {
-	pub fn get_req_id(&self) -> RequestId {
+	pub fn get_peers_hash(&self) -> u64 {
 		match self {
-			GossipMessage::ConfirmPeers(_, id) => *id,
-			GossipMessage::KeyGen(_, id) => *id,
-			GossipMessage::SigGen(_, id) => *id,
+			GossipMessage::ConfirmPeers(_, ge) => ge.peers_hash,
+			GossipMessage::KeyGen(_, ge) => ge.peers_hash,
+			GossipMessage::SigGen(_, ge) => ge.peers_hash,
 		}
 	}
 }
@@ -218,11 +220,11 @@ impl<Block: BlockT> sc_network_gossip::Validator<Block> for GossipValidator<Bloc
 	fn validate(
 		&self,
 		_context: &mut dyn ValidatorContext<Block>,
-		who: &PeerId,
+		_who: &PeerId,
 		mut data: &[u8],
 	) -> ValidationResult<Block::Hash> {
 		let gossip_msg = GossipMessage::decode(&mut data);
-		if let Ok(gossip_msg) = gossip_msg {
+		if let Ok(_gossip_msg) = gossip_msg {
 			// let req_id = gossip_msg.get_req_id();
 			// println!("{:?} req_id: {:?}", who, req_id);
 			let topic = super::bytes_topic::<Block>(b"mpc");
@@ -262,18 +264,19 @@ impl<Block: BlockT> sc_network_gossip::Validator<Block> for GossipValidator<Bloc
 
 			let gossip_msg = GossipMessage::decode(&mut data);
 			if let Ok(gossip_msg) = gossip_msg {
-				let our_hash = inner.get_peers_hash();
+				let cur_hash = inner.get_peers_hash();
+				let all_peers_hash = gossip_msg.get_peers_hash();
 
 				let is_awaiting_peers = inner.is_local_awaiting_peers();
 				let is_generating = inner.is_local_generating();
 
 				match gossip_msg {
-					GossipMessage::ConfirmPeers(_, all_peers_hash) => {
-						return is_awaiting_peers && our_hash == all_peers_hash;
+					GossipMessage::ConfirmPeers(_, _) => {
+						return is_awaiting_peers && cur_hash == all_peers_hash;
 					}
-					GossipMessage::KeyGen(_, all_peers_hash) => {
+					GossipMessage::KeyGen(_, _) => {
 						let is_valid = is_awaiting_peers || is_generating;
-						return is_valid && our_hash == all_peers_hash;
+						return is_valid && cur_hash == all_peers_hash;
 					}
 					GossipMessage::SigGen(_, _) => return true,
 				}
@@ -283,7 +286,7 @@ impl<Block: BlockT> sc_network_gossip::Validator<Block> for GossipValidator<Bloc
 	}
 
 	fn message_expired<'a>(&'a self) -> Box<dyn FnMut(Block::Hash, &[u8]) -> bool + 'a> {
-		Box::new(move |topic, mut data| {
+		Box::new(move |_topic, mut data| {
 			let inner = self.inner.read();
 			let is_complete = inner.is_local_complete();
 			let is_canceled = inner.is_local_canceled();
@@ -302,60 +305,58 @@ impl<Block: BlockT> sc_network_gossip::Validator<Block> for GossipValidator<Bloc
 				println!("In `message_expired` of {:?}", inner.get_local_index());
 				let gmsg = gossip_msg.clone();
 				match gmsg {
-					GossipMessage::ConfirmPeers(cpm, _all_peers_hash) => match cpm {
+					GossipMessage::ConfirmPeers(cpm, _) => match cpm {
 						ConfirmPeersMessage::Confirming(from) => {
-							println!("confirming from {:?}", from);
+							println!("  confirming from {:?}", from);
 						}
 						_ => {}
 					},
-					GossipMessage::KeyGen(kgm, _all_peers_hash) => match kgm {
+					GossipMessage::KeyGen(kgm, _) => match kgm {
 						KeyGenMessage::CommitAndDecommit(from, _, _) => {
-							println!("com decom from {:?}", from);
+							println!("  com decom from {:?}", from);
 						}
 						KeyGenMessage::VSS(from, _) => {
-							println!("VSS from {:?}", from);
+							println!("  VSS from {:?}", from);
 						}
 						KeyGenMessage::SecretShare(from, _) => {
-							println!("Secret share from {:?}", from);
+							println!("  Secret share from {:?}", from);
 						}
 						KeyGenMessage::Proof(from, _) => {
-							println!("proof from {:?}", from);
+							println!("  proof from {:?}", from);
 						}
 					},
 					_ => {}
 				}
-				let our_hash = inner.get_peers_hash();
 
-				println!("exit `message_expired` of {:?}", inner.get_local_index());
+				println!("Exit `message_expired` of {:?}", inner.get_local_index());
+
+				let cur_hash = inner.get_peers_hash();
+				let all_peers_hash = gossip_msg.get_peers_hash();
 
 				match gossip_msg {
-					GossipMessage::ConfirmPeers(cpm, all_peers_hash) => {
+					GossipMessage::ConfirmPeers(cpm, _) => {
 						match cpm {
-							ConfirmPeersMessage::Confirming(from_index) => {
-								let sender_id = inner.get_peer_id_by_index(from_index as usize);
+							ConfirmPeersMessage::Confirming(from) => {
+								let sender_id = inner.get_peer_id_by_index(from as usize);
 								if sender_id.is_none() {
 									return true;
 								}
 							}
-							ConfirmPeersMessage::Confirmed(sender_string_id) => {
-								let sender = PeerId::from_str(&sender_string_id);
-								if sender.is_err() {
-									return true;
-								}
-								if !inner.peers.contains_peer_id(&sender.unwrap()) {
+							ConfirmPeersMessage::Confirmed(from) => {
+								let sender_id = inner.get_peer_id_by_index(from as usize);
+								if sender_id.is_none() {
 									return true;
 								}
 							}
 						}
 						let is_awaiting_peers = inner.is_local_awaiting_peers();
-
-						return !is_awaiting_peers || is_canceled || our_hash != all_peers_hash;
+						return !is_awaiting_peers || is_canceled || cur_hash != all_peers_hash;
 					}
-					GossipMessage::KeyGen(kgm, all_peers_hash) => {
+					GossipMessage::KeyGen(kgm, _) => {
 						let from_index = kgm.get_index() as usize;
 						let sender_id = inner.get_peer_id_by_index(from_index);
 
-						return our_hash != all_peers_hash || sender_id.is_none();
+						return sender_id.is_none() || cur_hash != all_peers_hash;
 					}
 					GossipMessage::SigGen(_, _) => return false,
 				}

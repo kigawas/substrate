@@ -100,8 +100,8 @@ impl PartialEq for SigGenMessage {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode, PartialEq)]
 pub enum ConfirmPeersMessage {
-	Confirming(PeerIndex), // from_index
-	Confirmed(String),
+	Confirming(PeerIndex), // A -> B, A's index
+	Confirmed(PeerIndex),  // A -> B, A's index
 }
 
 #[cfg(test)]

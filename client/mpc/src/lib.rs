@@ -14,7 +14,7 @@ use futures::{
 	stream::StreamExt,
 	task::{Context, Poll, Spawn},
 };
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::{
 	KeyGenBroadcastMessage1 as KeyGenCommit, KeyGenDecommitMessage1 as KeyGenDecommit, Keys, Parameters, PartyPrivate,
 	SharedKeys, SignKeys,
@@ -25,8 +25,8 @@ use sc_client::Client;
 use sc_client_api::{backend::Backend, BlockchainEvents, CallExecutor, ExecutionStrategy};
 use sc_keystore::KeyStorePtr;
 use sc_network::{NetworkService, NetworkStateInfo, PeerId};
-use sc_network_gossip::{GossipEngine, Network as GossipNetwork, TopicNotification};
-use sp_blockchain::{Error as ClientError, HeaderBackend, Result as ClientResult};
+use sc_network_gossip::Network as GossipNetwork;
+use sp_blockchain::{Error as ClientError, Result as ClientResult};
 use sp_core::{
 	ecdsa::Pair,
 	offchain::{OffchainStorage, StorageKind},
@@ -43,7 +43,7 @@ mod periodic_stream;
 mod signer;
 
 use communication::{
-	gossip::{GossipMessage, MessageWithSender},
+	gossip::{GossipEra, GossipMessage, MessageWithSender},
 	message::{ConfirmPeersMessage, KeyGenMessage, PeerIndex, SigGenMessage},
 	NetworkBridge,
 };
@@ -91,6 +91,7 @@ impl NodeConfig {
 
 #[derive(Debug)]
 pub struct KeyGenState {
+	pub req_id: u64,
 	pub complete: bool,
 	pub local_key: Option<Keys>,
 	pub commits: BTreeMap<PeerIndex, KeyGenCommit>,
@@ -114,6 +115,7 @@ impl KeyGenState {
 impl Default for KeyGenState {
 	fn default() -> Self {
 		Self {
+			req_id: 0,
 			complete: false,
 			local_key: None,
 			commits: BTreeMap::new(),
@@ -138,7 +140,7 @@ pub(crate) struct Environment<B, E, Block: BlockT, RA, Storage> {
 }
 
 struct KeyGenWork<B, E, Block: BlockT, RA, Storage> {
-	key_gen: Pin<Box<dyn Future<Output = Result<(), Error>> + Send + Unpin>>,
+	worker: Pin<Box<dyn Future<Output = Result<(), Error>> + Send + Unpin>>,
 	env: Arc<Environment<B, E, Block, RA, Storage>>,
 	mpc_arg_rx: mpsc::UnboundedReceiver<MpcRequest>,
 }
@@ -170,25 +172,25 @@ where
 		});
 
 		let mut work = Self {
-			key_gen: Box::pin(futures::future::pending()),
+			worker: Box::pin(futures::future::pending()),
 			env,
 			mpc_arg_rx,
 		};
-		work.rebuild(true);
+		work.rebuild();
 		work
 	}
 
-	fn rebuild(&mut self, last_message_ok: bool) {
-		// last_message_ok = true when the first build, = false else
+	fn rebuild(&mut self) {
 		let (incoming, outgoing) = global_comm(&self.env.bridge, self.env.config.duration);
-		let signer = Signer::new(self.env.clone(), incoming, outgoing, last_message_ok);
-
-		self.key_gen = Box::pin(signer);
+		let signer = Signer::new(self.env.clone(), incoming, outgoing);
+		self.worker = Box::pin(signer);
 	}
 
 	fn handle_command(&mut self, command: MpcRequest) {
 		match command {
 			MpcRequest::KeyGen(id) => {
+				let mut state = self.env.state.write();
+				state.req_id = id;
 				self.env.bridge.start_key_gen(id);
 			}
 			_ => {}
@@ -208,8 +210,6 @@ where
 	type Output = Result<(), Error>;
 
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-		println!("POLLING IN KEYGEN WORK");
-
 		match self.mpc_arg_rx.poll_next_unpin(cx) {
 			Poll::Pending => {}
 			Poll::Ready(None) => {
@@ -222,9 +222,10 @@ where
 			}
 		}
 
-		match self.key_gen.poll_unpin(cx) {
+		match self.worker.poll_unpin(cx) {
 			Poll::Pending => {
 				{
+					info!("POLLING IN KEYGEN WORK: Pending");
 					let state = self.env.state.read();
 					let validator = self.env.bridge.validator.inner.read();
 
@@ -237,7 +238,7 @@ where
 					}
 
 					println!(
-						"INDEX {:?} state: commits {:?} decommits {:?} vss {:?} ss {:?}  proof {:?} has key {:?} complete {:?} peers hash {:?}",
+						"INDEX {:?} state: commits {:?} decommits {:?} vss {:?} ss {:?} proof {:?} has key {:?} has shared_key {:?} complete {:?} peers hash {:?}",
 						validator.get_local_index(),
 						state.commits.len(),
 						state.decommits.len(),
@@ -245,6 +246,7 @@ where
 						state.secret_shares.len(),
 						state.proofs.len(),
 						state.local_key.is_some(),
+						state.shared_keys.is_some(),
 						state.complete,
 						validator.get_peers_hash()
 					);
@@ -253,19 +255,21 @@ where
 				return Poll::Pending;
 			}
 			Poll::Ready(Ok(())) => {
+				info!("POLLING IN KEYGEN WORK: Ok");
 				return Poll::Ready(Ok(()));
 			}
-			Poll::Ready(Err(e)) => {
-				match e {
-					Error::Rebuild => {
-						self.rebuild(false);
-						futures01::task::current().notify();
-						return Poll::Pending;
-					}
-					_ => {}
+			Poll::Ready(Err(e)) => match e {
+				Error::Rebuild => {
+					info!("POLLING IN KEYGEN WORK: Error::Rebuild");
+					self.rebuild();
+					futures01::task::current().notify();
+					return Poll::Pending;
 				}
-				return Poll::Ready(Err(e));
-			}
+				e @ _ => {
+					info!("POLLING IN KEYGEN WORK: Error::{:?}", e);
+					return Poll::Ready(Err(e));
+				}
+			},
 		}
 	}
 }
@@ -315,9 +319,9 @@ where
 
 	let streamer = client.clone().import_notification_stream().for_each(move |n| {
 		let logs = n.header.digest().logs().iter();
-		if n.header.number() == &3.into() {
+		if n.header.number() == &2.into() {
 			// temp workaround since cannot use polkadot js now
-			let _ = tx.unbounded_send(MpcRequest::KeyGen(1));
+			let _ = tx.unbounded_send(MpcRequest::KeyGen(1234));
 		}
 
 		let arg = logs

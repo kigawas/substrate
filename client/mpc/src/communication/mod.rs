@@ -1,20 +1,16 @@
-use std::{future, marker::Unpin, pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc};
 
 use codec::{Decode, Encode};
-use futures::channel::oneshot::{self, Canceled};
-use futures::compat::{Compat, Compat01As03};
-use futures::future::FutureExt;
-use futures::prelude::{Future, Sink, Stream, TryStream};
-use futures::stream::{FilterMap, StreamExt, TryStreamExt};
+use futures::prelude::{Sink, Stream};
+use futures::stream::StreamExt;
 use futures::task::{Context, Poll};
-use log::{error, info, trace};
+use log::{info, trace};
 
-use sc_network::message::generic::{ConsensusMessage, Message};
-use sc_network::{NetworkService, PeerId};
-use sc_network_gossip::{GossipEngine, Network, TopicNotification};
+use sc_network::PeerId;
+use sc_network_gossip::{GossipEngine, Network};
 use sp_runtime::traits::{Block as BlockT, DigestFor, Hash as HashT, Header as HeaderT, NumberFor, ProvideRuntimeApi};
 
-use sp_mpc::MPC_ENGINE_ID;
+use sp_mpc::{RequestId, MPC_ENGINE_ID};
 
 pub mod gossip;
 pub mod message;
@@ -22,7 +18,7 @@ mod peer;
 
 use crate::{Error, NodeConfig};
 
-use gossip::{GossipMessage, GossipValidator, MessageWithReceiver, MessageWithSender, RequestId};
+use gossip::{GossipEra, GossipMessage, GossipValidator, MessageWithReceiver, MessageWithSender};
 use message::ConfirmPeersMessage;
 
 pub(crate) fn bytes_topic<B: BlockT>(input: &[u8]) -> B::Hash {
@@ -130,8 +126,8 @@ where
 		(incoming.boxed(), outgoing)
 	}
 
-	pub fn start_key_gen(&self, _id: RequestId) {
-		println!("start key gen");
+	pub fn start_key_gen(&self, req_id: RequestId) {
+		info!("Start key gen: req_id {:?}", req_id);
 		let inner = self.validator.inner.read();
 
 		let all_peers_len = inner.get_peers_len();
@@ -141,8 +137,11 @@ where
 		}
 
 		let our_index = inner.get_local_index() as u16;
-		let all_peers_hash = inner.get_peers_hash();
-		let msg = GossipMessage::ConfirmPeers(ConfirmPeersMessage::Confirming(our_index), all_peers_hash);
+		let peers_hash = inner.get_peers_hash();
+		let msg = GossipMessage::ConfirmPeers(
+			ConfirmPeersMessage::Confirming(our_index),
+			GossipEra { req_id, peers_hash },
+		);
 		let peers = inner.get_other_peers();
 		self.gossip_engine.send_message(peers, msg.encode());
 	}

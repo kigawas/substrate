@@ -3,11 +3,8 @@ use std::{
 	fmt::Debug,
 	marker::Unpin,
 	pin::Pin,
-	sync::Arc,
 	time::{Duration, Instant},
 };
-
-use codec::{Decode, Encode};
 
 use futures::future::FutureExt;
 use futures::prelude::Stream;
@@ -70,11 +67,9 @@ where
 		}
 
 		let mut is_ready = false;
-		if let Poll::Ready(Some(_)) = self.check_pending.poll_next_unpin(cx) {
+		while let Poll::Ready(Some(_)) = self.check_pending.poll_next_unpin(cx) {
 			is_ready = true;
 		}
-
-		println!("ready? {:?}", is_ready);
 
 		if let Some(ready) = self.ready.pop_front() {
 			return Poll::Ready(Some(ready));
