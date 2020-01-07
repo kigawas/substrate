@@ -685,6 +685,12 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl sp_mpc::MpcApi<Block> for Runtime {
+		fn get_public_key(req_id: sp_mpc::RequestId) -> Option<Vec<u8>> {
+			Mpc::get_public_key(req_id)
+		}
+	}
+
 	impl sp_authority_discovery::AuthorityDiscoveryApi<Block> for Runtime {
 		fn authorities() -> Vec<AuthorityDiscoveryId> {
 			AuthorityDiscovery::authorities()

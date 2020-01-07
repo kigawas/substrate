@@ -3529,6 +3529,7 @@ dependencies = [
  "sp-inherents",
  "sp-io",
  "sp-keyring",
+ "sp-mpc",
  "sp-offchain",
  "sp-runtime",
  "sp-session",

@@ -171,17 +171,7 @@ decl_event!(
 );
 
 impl<T: Trait> Module<T> {
-	fn submit_signed(call: Call<T>) {
-		let res = T::SubmitTransaction::submit_signed(call);
-
-		if res.is_empty() {
-			debug::error!("No local accounts found.");
-		} else {
-			debug::info!("Sent transactions from: {:?}", res);
-		}
-	}
-
-	fn get_public_key(req_id: u64) -> Option<Vec<u8>> {
+	pub fn get_public_key(req_id: u64) -> Option<Vec<u8>> {
 		let r = <Results>::get(req_id);
 		if let Some(r) = r {
 			match r {
@@ -190,6 +180,16 @@ impl<T: Trait> Module<T> {
 			}
 		}
 		None
+	}
+
+	fn submit_signed(call: Call<T>) {
+		let res = T::SubmitTransaction::submit_signed(call);
+
+		if res.is_empty() {
+			debug::error!("No local accounts found.");
+		} else {
+			debug::info!("Sent transactions from: {:?}", res);
+		}
 	}
 
 	fn call_save_sig(req_id: u64, pk_id: u64, sig: Vec<u8>) {
