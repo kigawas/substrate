@@ -112,7 +112,7 @@ impl Store {
 	/// Insert a new key with anonymous crypto.
 	///
 	/// Places it into the file system store.
-	pub fn insert_unknown(&self, key_type: KeyTypeId, suri: &str, public: &[u8]) -> Result<()> {
+	fn insert_unknown(&self, key_type: KeyTypeId, suri: &str, public: &[u8]) -> Result<()> {
 		let mut file = File::create(self.key_file_path(public, key_type)).map_err(Error::Io)?;
 		serde_json::to_writer(&file, &suri).map_err(Error::Json)?;
 		file.flush().map_err(Error::Io)?;

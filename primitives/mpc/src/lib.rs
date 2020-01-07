@@ -67,8 +67,8 @@ pub fn get_storage_key(id: u64, ost: OffchainStorageType) -> Vec<u8> {
 	k
 }
 
-// sp_api::decl_runtime_apis! {
-// 	pub trait MpcApi {
-// 		fn test();
-// 	}
-// }
+sp_api::decl_runtime_apis! {
+	pub trait MpcApi {
+		fn get_public_key(req_id: RequestId) -> Option<Vec<u8>>;
+	}
+}

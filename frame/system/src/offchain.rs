@@ -18,7 +18,7 @@
 
 use codec::Encode;
 use frame_support::debug;
-use sp_runtime::app_crypto::{self, AppPublic, AppSignature, RuntimeAppPublic};
+use sp_runtime::app_crypto::{AppPublic, AppSignature, RuntimeAppPublic};
 use sp_runtime::traits::{Extrinsic as ExtrinsicT, IdentifyAccount};
 use sp_std::convert::TryInto;
 use sp_std::prelude::Vec;

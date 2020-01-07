@@ -8,7 +8,7 @@ use log::{info, trace};
 
 use sc_network::PeerId;
 use sc_network_gossip::{GossipEngine, Network};
-use sp_runtime::traits::{Block as BlockT, DigestFor, Hash as HashT, Header as HeaderT, NumberFor, ProvideRuntimeApi};
+use sp_runtime::traits::{Block as BlockT, Hash as HashT, Header as HeaderT};
 
 use sp_mpc::{RequestId, MPC_ENGINE_ID};
 

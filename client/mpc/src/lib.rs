@@ -21,7 +21,6 @@ use parking_lot::RwLock;
 
 use sc_client::Client;
 use sc_client_api::{backend::Backend, BlockchainEvents, CallExecutor};
-use sc_keystore::KeyStorePtr;
 use sc_network::{NetworkService, NetworkStateInfo, PeerId};
 use sc_network_gossip::Network as GossipNetwork;
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
@@ -313,9 +312,12 @@ where
 
 	let streamer = client.clone().import_notification_stream().for_each(move |n| {
 		let logs = n.header.digest().logs().iter();
-		if n.header.number() == &2.into() {
+		let block_number = n.header.number();
+		if block_number == &2.into() {
 			// temp workaround since cannot use polkadot js now
 			let _ = tx.unbounded_send(MpcRequest::KeyGen(1234));
+		} else if block_number == &4.into() {
+			let _ = tx.unbounded_send(MpcRequest::SigGen(1235, 1234, vec![1u8]));
 		}
 
 		let arg = logs

@@ -70,9 +70,27 @@ decl_module! {
 		}
 
 		pub fn save_key(origin, req_id: u64, data: Vec<u8>) -> DispatchResult {
-			let _who = ensure_signed(origin)?;
+			let who = ensure_signed(origin)?;
 			ensure!(<Requests>::exists(req_id), "req id does not exist");
 			ensure!(!<Results>::exists(req_id), "req id exists");
+
+			// remove req
+			<PendingReqIds>::mutate(|ids| {
+				ids.remove(&req_id);
+			});
+			<Requests>::remove(req_id);
+
+			// save key
+			<ActiveKeyIds>::mutate(|ids| {
+				ids.insert(req_id)
+			});
+
+			<Results>::insert(req_id, MpcResult::KeyGen { req_id, pk: data });
+			Self::deposit_event(RawEvent::MpcResponse(
+				req_id, who
+			));
+			debug::warn!("save key ok");
+
 			Ok(())
 		}
 
@@ -103,12 +121,12 @@ decl_module! {
 			});
 			<Requests>::remove(req_id);
 
-			// save res
+			// save sig
 			<Results>::insert(req_id, MpcResult::SigGen { req_id, pk_id, sig });
 			Self::deposit_event(RawEvent::MpcResponse(
 				req_id, who
 			));
-			debug::warn!("save sig");
+			debug::warn!("save sig ok");
 			Ok(())
 		}
 
@@ -161,6 +179,17 @@ impl<T: Trait> Module<T> {
 		} else {
 			debug::info!("Sent transactions from: {:?}", res);
 		}
+	}
+
+	fn get_public_key(req_id: u64) -> Option<Vec<u8>> {
+		let r = <Results>::get(req_id);
+		if let Some(r) = r {
+			match r {
+				MpcResult::KeyGen { pk, .. } => return Some(pk),
+				MpcResult::SigGen { .. } => {}
+			}
+		}
+		None
 	}
 
 	fn call_save_sig(req_id: u64, pk_id: u64, sig: Vec<u8>) {
