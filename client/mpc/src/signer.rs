@@ -8,7 +8,6 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::{Keys, Pa
 
 use sc_client_api::{backend::Backend, CallExecutor};
 use sc_network::PeerId;
-use sc_network_gossip::Network;
 use sp_core::{offchain::OffchainStorage, Blake2Hasher, H256};
 use sp_runtime::traits::Block as BlockT;
 

@@ -1,6 +1,4 @@
-use std::{
-	collections::BTreeMap, fmt::Debug, hash::Hash, marker::PhantomData, pin::Pin, sync::Arc, thread, time::Duration,
-};
+use std::{collections::BTreeMap, fmt::Debug, pin::Pin, sync::Arc};
 
 use curv::{
 	cryptographic_primitives::{proofs::sigma_dlog::DLogProof, secret_sharing::feldman_vss::VerifiableSS},
@@ -14,7 +12,7 @@ use futures::{
 	stream::StreamExt,
 	task::{Context, Poll, Spawn},
 };
-use log::{debug, error, info, warn};
+use log::{error, info};
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::{
 	KeyGenBroadcastMessage1 as KeyGenCommit, KeyGenDecommitMessage1 as KeyGenDecommit, Keys, Parameters, PartyPrivate,
 	SharedKeys, SignKeys,
@@ -22,21 +20,17 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::{
 use parking_lot::RwLock;
 
 use sc_client::Client;
-use sc_client_api::{backend::Backend, BlockchainEvents, CallExecutor, ExecutionStrategy};
+use sc_client_api::{backend::Backend, BlockchainEvents, CallExecutor};
 use sc_keystore::KeyStorePtr;
 use sc_network::{NetworkService, NetworkStateInfo, PeerId};
 use sc_network_gossip::Network as GossipNetwork;
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
-use sp_core::{
-	ecdsa::Pair,
-	offchain::{OffchainStorage, StorageKind},
-	Blake2Hasher, H256,
-};
+use sp_core::{offchain::OffchainStorage, Blake2Hasher, H256};
 use sp_offchain::STORAGE_PREFIX;
 use sp_runtime::generic::OpaqueDigestItemId;
 use sp_runtime::traits::{Block as BlockT, Header};
 
-use sp_mpc::{get_storage_key, ConsensusLog, MpcRequest, OffchainStorageType, RequestId, MPC_ENGINE_ID};
+use sp_mpc::{get_storage_key, ConsensusLog, MpcRequest, OffchainStorageType, MPC_ENGINE_ID};
 
 mod communication;
 mod periodic_stream;

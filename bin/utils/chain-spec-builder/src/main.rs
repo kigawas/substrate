@@ -172,7 +172,6 @@ fn generate_authority_keys_and_store(
 			authority_discovery.as_slice(),
 		)?;
 
-
 		insert_key(
 			sp_mpc::KEY_TYPE,
 			mpc.as_slice(),
@@ -265,7 +264,6 @@ fn main() -> Result<(), String> {
 			(authority_seeds, endowed_accounts, sudo_account)
 		},
 		ChainSpecBuilder::New { authority_seeds, endowed_accounts, sudo_account, .. } => {
-			println!("new");
 			(authority_seeds, endowed_accounts, sudo_account)
 		},
 	};
