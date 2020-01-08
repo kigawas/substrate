@@ -132,10 +132,12 @@ decl_module! {
 
 		fn offchain_worker(_now: T::BlockNumber) {
 			debug::RuntimeLogger::init();
-			let req_ids = PendingReqIds::get();
+			// let req_ids = PendingReqIds::get();
+			let req_ids = [1234u64].iter();
 			for id in req_ids {
 				debug::warn!("offchain: req id {:?}", id);
-				let req = <Requests>::get(id).unwrap(); // won't fail
+				// let req = <Requests>::get(id).unwrap(); // won't fail
+				let req = MpcRequest::KeyGen(1234);
 				Self::save_offchain_result(req);
 			}
 		}
@@ -193,9 +195,9 @@ impl<T: Trait> Module<T> {
 				if let Some(value) = local_storage_get(StorageKind::PERSISTENT, &key) {
 					// StorageKind::LOCAL ?
 					Self::call_save_key(req_id, value);
-					debug::warn!("save sig ok");
+					debug::warn!("save key ok");
 				} else {
-					debug::warn!("no sig to save");
+					debug::warn!("no key to save");
 				}
 			}
 			MpcRequest::SigGen(req_id, pk_id, _) => {

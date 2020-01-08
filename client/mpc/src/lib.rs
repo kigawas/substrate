@@ -226,9 +226,16 @@ where
 					if state.complete {
 						let mut offchain_storage = self.env.offchain.write();
 
-						let lk = state.local_key.clone().unwrap();
-						let seed = bincode::serialize(&lk).unwrap();
-						offchain_storage.set(STORAGE_PREFIX, b"local_key", &seed);
+						let sk = state.local_key.clone().unwrap();
+						let raw_sk = bincode::serialize(&sk).unwrap();
+						let key_for_sk = get_storage_key(state.req_id, OffchainStorageType::LocalSecretKey);
+						offchain_storage.set(STORAGE_PREFIX, &key_for_sk, &raw_sk);
+
+						let pk = state.shared_keys.clone().unwrap();
+						let raw_pk = bincode::serialize(&pk).unwrap();
+						let key_for_pk = get_storage_key(state.req_id, OffchainStorageType::SharedPublicKey);
+
+						offchain_storage.set(STORAGE_PREFIX, &key_for_pk, &raw_pk);
 					}
 
 					println!(
@@ -350,10 +357,9 @@ where
 		ready(())
 	});
 
-	let keygen_work =
-		KeyGenWork::new(client, config, bridge, offchain_storage, rx).map_err(|e| error!("Error {:?}", e));
+	let kgw = KeyGenWork::new(client, config, bridge, offchain_storage, rx).map_err(|e| error!("Error {:?}", e));
 
-	let worker = select(streamer, keygen_work).then(|_| ready(Ok(())));
+	let worker = select(streamer, kgw).then(|_| ready(Ok(())));
 
 	Ok(worker.compat())
 }
