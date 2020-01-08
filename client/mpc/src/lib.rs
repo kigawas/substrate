@@ -19,17 +19,16 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::{
 };
 use parking_lot::RwLock;
 
-use sc_client::Client;
-use sc_client_api::{backend::Backend, BlockchainEvents, CallExecutor};
+use sc_client_api::{blockchain::HeaderBackend, Backend, BlockchainEvents};
 use sc_network::{NetworkService, NetworkStateInfo, PeerId};
 use sc_network_gossip::Network as GossipNetwork;
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
 use sp_core::{offchain::OffchainStorage, Blake2Hasher, H256};
 use sp_offchain::STORAGE_PREFIX;
-use sp_runtime::generic::OpaqueDigestItemId;
-use sp_runtime::traits::{Block as BlockT, Header};
+use sp_runtime::generic::{BlockId, OpaqueDigestItemId};
+use sp_runtime::traits::{Block as BlockT, Header, ProvideRuntimeApi};
 
-use sp_mpc::{get_storage_key, ConsensusLog, MpcRequest, OffchainStorageType, MPC_ENGINE_ID};
+use sp_mpc::{get_storage_key, ConsensusLog, MpcApi, MpcRequest, OffchainStorageType, MPC_ENGINE_ID};
 
 mod communication;
 mod periodic_stream;
@@ -124,31 +123,30 @@ impl Default for KeyGenState {
 #[derive(Debug)]
 pub struct SigGenState {}
 
-pub(crate) struct Environment<B, E, Block: BlockT, RA, Storage> {
-	pub client: Arc<Client<B, E, Block, RA>>,
+pub(crate) struct Environment<Client, Block: BlockT, Storage> {
+	pub client: Arc<Client>,
 	pub config: NodeConfig,
 	pub bridge: NetworkBridge<Block>,
 	pub state: Arc<RwLock<KeyGenState>>,
 	pub offchain: Arc<RwLock<Storage>>,
 }
 
-struct KeyGenWork<B, E, Block: BlockT, RA, Storage> {
+struct KeyGenWork<Client, Block: BlockT, Storage> {
 	worker: Pin<Box<dyn Future<Output = Result<(), Error>> + Send + Unpin>>,
-	env: Arc<Environment<B, E, Block, RA, Storage>>,
+	env: Arc<Environment<Client, Block, Storage>>,
 	mpc_arg_rx: mpsc::UnboundedReceiver<MpcRequest>,
 }
 
-impl<B, E, Block, RA, Storage> KeyGenWork<B, E, Block, RA, Storage>
+impl<Client, Block, Storage> KeyGenWork<Client, Block, Storage>
 where
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
+	Client: HeaderBackend<Block> + ProvideRuntimeApi + Send + Sync + 'static,
+	<Client as ProvideRuntimeApi>::Api: MpcApi<Block>,
 	Block: BlockT<Hash = H256> + Unpin,
 	Block::Hash: Ord,
-	RA: Send + Sync + 'static,
 	Storage: OffchainStorage + 'static,
 {
 	fn new(
-		client: Arc<Client<B, E, Block, RA>>,
+		client: Arc<Client>,
 		config: NodeConfig,
 		bridge: NetworkBridge<Block>,
 		offchain: Storage,
@@ -186,18 +184,21 @@ where
 				state.req_id = id;
 				self.env.bridge.start_key_gen(id);
 			}
-			_ => {}
+			MpcRequest::SigGen(_req_id, pk_id, _) => {
+				let id = BlockId::hash(self.env.client.info().best_hash);
+				let pk = self.env.client.runtime_api().get_public_key(&id, pk_id);
+				info!("get pk from onchain {:?}", pk);
+			}
 		}
 	}
 }
 
-impl<B, E, Block, RA, Storage> Future for KeyGenWork<B, E, Block, RA, Storage>
+impl<Client, Block, Storage> Future for KeyGenWork<Client, Block, Storage>
 where
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + 'static + Send + Sync,
+	Client: HeaderBackend<Block> + ProvideRuntimeApi + Send + Sync + 'static,
+	<Client as ProvideRuntimeApi>::Api: MpcApi<Block>,
 	Block: BlockT<Hash = H256> + Unpin,
 	Block::Hash: Ord,
-	RA: Send + Sync + 'static,
 	Storage: OffchainStorage + 'static,
 {
 	type Output = Result<(), Error>;
@@ -283,19 +284,19 @@ where
 	(global_in, global_out)
 }
 
-pub fn run_mpc_task<B, E, Block, N, RA, Ex>(
-	client: Arc<Client<B, E, Block, RA>>,
+pub fn run_mpc_task<Client, Block, B, N, Ex>(
+	client: Arc<Client>,
 	backend: Arc<B>,
 	network: N,
 	executor: Ex,
 ) -> ClientResult<impl futures01::Future<Item = (), Error = ()>>
 where
+	Client: HeaderBackend<Block> + ProvideRuntimeApi + BlockchainEvents<Block> + Send + Sync + 'static,
+	<Client as ProvideRuntimeApi>::Api: MpcApi<Block>,
 	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + 'static + Send + Sync,
 	Block: BlockT<Hash = H256> + Unpin,
 	Block::Hash: Ord,
 	N: Network<Block>,
-	RA: Send + Sync + 'static,
 	Ex: Spawn + 'static,
 {
 	let config = NodeConfig {

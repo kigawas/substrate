@@ -6,10 +6,10 @@ use futures::task::{Context, Poll};
 use log::{error, info};
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::{Keys, Parameters};
 
-use sc_client_api::{backend::Backend, CallExecutor};
+use sc_client_api::{backend::Backend, blockchain::HeaderBackend, CallExecutor};
 use sc_network::PeerId;
 use sp_core::{offchain::OffchainStorage, Blake2Hasher, H256};
-use sp_runtime::traits::Block as BlockT;
+use sp_runtime::traits::{Block as BlockT, ProvideRuntimeApi};
 
 use super::{
 	ConfirmPeersMessage, Environment, Error, GossipEra, GossipMessage, KeyGenMessage, MessageWithSender, PeerIndex,
@@ -103,30 +103,28 @@ where
 	}
 }
 
-pub(crate) struct Signer<B, E, Block: BlockT, RA, In, Out, Storage>
+pub(crate) struct Signer<Client, Block: BlockT, In, Out, Storage>
 where
 	In: Stream<Item = MessageWithSender>,
 	Out: Sink<MessageWithSender, Error = Error>,
 {
-	env: Arc<Environment<B, E, Block, RA, Storage>>,
+	env: Arc<Environment<Client, Block, Storage>>,
 	global_in: In,
 	global_out: Buffered<MessageWithSender, Out>,
 	should_rebuild: bool,
 	last_message_ok: bool,
 }
 
-impl<B, E, Block, RA, In, Out, Storage> Signer<B, E, Block, RA, In, Out, Storage>
+impl<Client, Block, In, Out, Storage> Signer<Client, Block, In, Out, Storage>
 where
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
+	Client:  HeaderBackend<Block>+ProvideRuntimeApi + Send + Sync + 'static,
 	Block: BlockT<Hash = H256>,
 	Block::Hash: Ord,
-	RA: Send + Sync + 'static,
 	In: Stream<Item = MessageWithSender> + Unpin,
 	Out: Sink<MessageWithSender, Error = Error> + Unpin,
 	Storage: OffchainStorage,
 {
-	pub fn new(env: Arc<Environment<B, E, Block, RA, Storage>>, global_in: In, global_out: Out) -> Self {
+	pub fn new(env: Arc<Environment<Client, Block, Storage>>, global_in: In, global_out: Out) -> Self {
 		Self {
 			env,
 			global_in,
@@ -354,13 +352,11 @@ where
 
 					if Keys::verify_dlog_proofs(&params, proofs.as_slice(), points.as_slice()).is_ok() {
 						info!("Key generation complete");
-						println!("key gen complete");
 						state.complete = true;
 						validator.set_local_complete();
 					} else {
 						// reset everything?
 						error!("Key generation failed");
-						println!("key gen failed");
 						state.reset();
 						validator.set_local_canceled();
 					}
@@ -395,13 +391,11 @@ where
 	}
 }
 
-impl<B, E, Block, RA, In, Out, Storage> Future for Signer<B, E, Block, RA, In, Out, Storage>
+impl<Client, Block, In, Out, Storage> Future for Signer<Client, Block, In, Out, Storage>
 where
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
+	Client:  HeaderBackend<Block>+ProvideRuntimeApi + Send + Sync + 'static,
 	Block: BlockT<Hash = H256>,
 	Block::Hash: Ord,
-	RA: Send + Sync + 'static,
 	In: Stream<Item = MessageWithSender> + Unpin,
 	Out: Sink<MessageWithSender, Error = Error> + Unpin,
 	Storage: OffchainStorage,

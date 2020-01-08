@@ -28,7 +28,6 @@ sp-mpc = { path = "../../primitives/mpc" }
 
 # client
 sc-client-api = { path = "../api" }
-sc-client = { path = "../" }
 sc-keystore = { path = "../keystore" }
 sc-network = { path = "../network" }
 sc-network-gossip = { path = "../network-gossip"}

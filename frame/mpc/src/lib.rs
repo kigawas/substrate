@@ -134,15 +134,9 @@ decl_module! {
 			debug::RuntimeLogger::init();
 			let req_ids = PendingReqIds::get();
 			for id in req_ids {
-				let key = get_storage_key(id, OffchainStorageType::Signature);
-				debug::warn!("key {:?}", key);
-				if let Some(value) = local_storage_get(StorageKind::PERSISTENT, &key) {
-					// StorageKind::LOCAL ?
-					Self::call_save_sig(id, 0, value);
-					debug::warn!("insert ok");
-				} else {
-					debug::warn!("nothing");
-				}
+				debug::warn!("offchain: req id {:?}", id);
+				let req = <Requests>::get(id).unwrap(); // won't fail
+				Self::save_offchain_result(req);
 			}
 		}
 
@@ -189,6 +183,31 @@ impl<T: Trait> Module<T> {
 			debug::error!("No local accounts found.");
 		} else {
 			debug::info!("Sent transactions from: {:?}", res);
+		}
+	}
+
+	fn save_offchain_result(req: MpcRequest) {
+		match req {
+			MpcRequest::KeyGen(req_id) => {
+				let key = get_storage_key(req_id, OffchainStorageType::SharedPublicKey);
+				if let Some(value) = local_storage_get(StorageKind::PERSISTENT, &key) {
+					// StorageKind::LOCAL ?
+					Self::call_save_key(req_id, value);
+					debug::warn!("save sig ok");
+				} else {
+					debug::warn!("no sig to save");
+				}
+			}
+			MpcRequest::SigGen(req_id, pk_id, _) => {
+				let key = get_storage_key(req_id, OffchainStorageType::Signature);
+				if let Some(value) = local_storage_get(StorageKind::PERSISTENT, &key) {
+					// StorageKind::LOCAL ?
+					Self::call_save_sig(req_id, pk_id, value);
+					debug::warn!("save sig ok");
+				} else {
+					debug::warn!("no sig to save");
+				}
+			}
 		}
 	}
 
