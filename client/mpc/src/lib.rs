@@ -95,8 +95,8 @@ pub struct KeyGenState {
 }
 
 impl KeyGenState {
-	pub fn shared_public_key(&self) -> Option<GE> {
-		self.shared_keys.clone().map(|sk| sk.y)
+	pub fn shared_public_key(&self) -> Option<Vec<u8>> {
+		self.shared_keys.clone().map(|sk| sk.y.pk_to_key_slice())
 	}
 
 	pub fn reset(&mut self) {
@@ -127,7 +127,7 @@ pub(crate) struct Environment<Client, Block: BlockT, Storage> {
 	pub client: Arc<Client>,
 	pub config: NodeConfig,
 	pub bridge: NetworkBridge<Block>,
-	pub state: Arc<RwLock<KeyGenState>>,
+	pub state: Arc<RwLock<KeyGenState>>, // HashMap id -> key gen state
 	pub offchain: Arc<RwLock<Storage>>,
 }
 
@@ -187,7 +187,7 @@ where
 			MpcRequest::SigGen(_req_id, pk_id, _) => {
 				let id = BlockId::hash(self.env.client.info().best_hash);
 				let pk = self.env.client.runtime_api().get_public_key(&id, pk_id);
-				info!("get pk from onchain {:?}", pk);
+				info!("get pk from onchain {:x?} of {:?}", pk, pk_id);
 			}
 		}
 	}
@@ -232,9 +232,10 @@ where
 						offchain_storage.set(STORAGE_PREFIX, &key_for_sk, &raw_sk);
 
 						let pk = state.shared_keys.clone().unwrap();
-						let raw_pk = bincode::serialize(&pk).unwrap();
+						let raw_pk = state.shared_public_key().unwrap();
 						let key_for_pk = get_storage_key(state.req_id, OffchainStorageType::SharedPublicKey);
 
+						println!("  pk: {:?}, raw_pk: {:x?}", b"", raw_pk);
 						offchain_storage.set(STORAGE_PREFIX, &key_for_pk, &raw_pk);
 					}
 
@@ -324,7 +325,7 @@ where
 		if block_number == &2.into() {
 			// temp workaround since cannot use polkadot js now
 			let _ = tx.unbounded_send(MpcRequest::KeyGen(1234));
-		} else if block_number == &4.into() {
+		} else if block_number == &5.into() {
 			let _ = tx.unbounded_send(MpcRequest::SigGen(1235, 1234, vec![1u8]));
 		}
 
@@ -340,13 +341,13 @@ where
 				MpcRequest::SigGen(req_id, pk_id, mut data) => {
 					let req = MpcRequest::SigGen(req_id, pk_id, data.clone());
 					let _ = tx.unbounded_send(req);
-					if let Some(mut offchain_storage) = backend.offchain_storage() {
-						let key = get_storage_key(req_id, OffchainStorageType::Signature);
-						info!("key {:?} data {:?}", key, data);
-						let mut t = vec![1u8];
-						t.append(&mut data);
-						offchain_storage.set(STORAGE_PREFIX, &key, &t);
-					}
+					// if let Some(mut offchain_storage) = backend.offchain_storage() {
+					// 	let key = get_storage_key(req_id, OffchainStorageType::Signature);
+					// 	info!("key {:?} data {:?}", key, data);
+					// 	let mut t = vec![1u8];
+					// 	t.append(&mut data);
+					// 	offchain_storage.set(STORAGE_PREFIX, &key, &t);
+					// }
 				}
 				kg @ MpcRequest::KeyGen(_) => {
 					let _ = tx.unbounded_send(kg);

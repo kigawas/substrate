@@ -57,22 +57,27 @@ decl_module! {
 		fn deposit_event() = default;
 
 		fn request_key(origin, req_id: u64) -> DispatchResult {
-			let _who = ensure_signed(origin)?;
+			let who = ensure_signed(origin)?;
 			ensure!(!<Requests>::exists(req_id), "req id exists");
 			ensure!(!<Results>::exists(req_id), "req id exists");
 
 			<PendingReqIds>::mutate(|ids| {
 				ids.insert(req_id);
 			});
+			<Requests>::insert(req_id, MpcRequest::KeyGen(req_id));
+
 			Self::send_keygen_log(req_id);
-			// deposit event
+			Self::deposit_event(RawEvent::MpcRequest(
+				req_id, who
+			));
 			Ok(())
 		}
 
 		pub fn save_key(origin, req_id: u64, data: Vec<u8>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			ensure!(<Requests>::exists(req_id), "req id does not exist");
-			ensure!(!<Results>::exists(req_id), "req id exists");
+			debug::warn!("start save key");
+			// ensure!(<Requests>::exists(req_id), "req id does not exist"); //temp remove
+			ensure!(!<Results>::exists(req_id), "result exists for the req id");
 
 			// remove req
 			<PendingReqIds>::mutate(|ids| {
@@ -178,16 +183,6 @@ impl<T: Trait> Module<T> {
 		None
 	}
 
-	fn submit_signed(call: Call<T>) {
-		let res = T::SubmitTransaction::submit_signed(call);
-
-		if res.is_empty() {
-			debug::error!("No local accounts found.");
-		} else {
-			debug::info!("Sent transactions from: {:?}", res);
-		}
-	}
-
 	fn save_offchain_result(req: MpcRequest) {
 		match req {
 			MpcRequest::KeyGen(req_id) => {
@@ -195,9 +190,9 @@ impl<T: Trait> Module<T> {
 				if let Some(value) = local_storage_get(StorageKind::PERSISTENT, &key) {
 					// StorageKind::LOCAL ?
 					Self::call_save_key(req_id, value);
-					debug::warn!("save key ok");
+					debug::warn!("call save_key ok");
 				} else {
-					debug::warn!("no key to save");
+					debug::warn!("call save_key error");
 				}
 			}
 			MpcRequest::SigGen(req_id, pk_id, _) => {
@@ -205,9 +200,9 @@ impl<T: Trait> Module<T> {
 				if let Some(value) = local_storage_get(StorageKind::PERSISTENT, &key) {
 					// StorageKind::LOCAL ?
 					Self::call_save_sig(req_id, pk_id, value);
-					debug::warn!("save sig ok");
+					debug::warn!("call save_sig ok");
 				} else {
-					debug::warn!("no sig to save");
+					debug::warn!("call save_sig error");
 				}
 			}
 		}
@@ -221,6 +216,16 @@ impl<T: Trait> Module<T> {
 	fn call_save_key(req_id: u64, pk: Vec<u8>) {
 		let call = Call::save_key(req_id, pk);
 		Self::submit_signed(call);
+	}
+
+	fn submit_signed(call: Call<T>) {
+		let res = T::SubmitTransaction::submit_signed(call);
+
+		if res.is_empty() {
+			debug::error!("No local accounts found.");
+		} else {
+			debug::info!("Sent transactions from: {:?}", res);
+		}
 	}
 
 	fn is_authority(who: &T::AccountId) -> bool {
