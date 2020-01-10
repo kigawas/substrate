@@ -36,7 +36,7 @@ pub enum MpcRequest {
 }
 
 pub enum OffchainStorageType {
-	LocalSecretKey,
+	LocalKeyState,
 	SharedPublicKey,
 	Signature,
 }
@@ -53,11 +53,11 @@ pub fn get_storage_key(id: u64, ost: OffchainStorageType) -> Vec<u8> {
 	let mut k = Vec::new();
 
 	match ost {
-		OffchainStorageType::LocalSecretKey => {
-			k.extend(b"mpc/sk/");
+		OffchainStorageType::LocalKeyState => {
+			k.extend(b"mpc/lks/");
 		}
 		OffchainStorageType::SharedPublicKey => {
-			k.extend(b"mpc/pk/");
+			k.extend(b"mpc/spk/");
 		}
 		OffchainStorageType::Signature => {
 			k.extend(b"mpc/sig/");

@@ -18,6 +18,7 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::{
 	SharedKeys, SignKeys,
 };
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 
 use sc_client_api::{blockchain::HeaderBackend, Backend, BlockchainEvents};
 use sc_network::{NetworkService, NetworkStateInfo, PeerId};
@@ -81,7 +82,7 @@ impl NodeConfig {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct KeyGenState {
 	pub req_id: u64,
 	pub complete: bool,
@@ -226,10 +227,10 @@ where
 					if state.complete {
 						let mut offchain_storage = self.env.offchain.write();
 
-						let sk = state.local_key.clone().unwrap();
-						let raw_sk = bincode::serialize(&sk).unwrap();
-						let key_for_sk = get_storage_key(state.req_id, OffchainStorageType::LocalSecretKey);
-						offchain_storage.set(STORAGE_PREFIX, &key_for_sk, &raw_sk);
+						let ls = state.clone();
+						let raw_state = bincode::serialize(&ls).unwrap();
+						let key_for_state = get_storage_key(state.req_id, OffchainStorageType::LocalKeyState);
+						offchain_storage.set(STORAGE_PREFIX, &key_for_state, &raw_state);
 
 						let pk = state.shared_keys.clone().unwrap();
 						let raw_pk = state.shared_public_key().unwrap();
