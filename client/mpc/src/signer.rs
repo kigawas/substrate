@@ -8,8 +8,9 @@ use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::{Keys, Pa
 
 use sc_client_api::{backend::Backend, blockchain::HeaderBackend, CallExecutor};
 use sc_network::PeerId;
+use sp_api::ProvideRuntimeApi;
 use sp_core::{offchain::OffchainStorage, Blake2Hasher, H256};
-use sp_runtime::traits::{Block as BlockT, ProvideRuntimeApi};
+use sp_runtime::traits::Block as BlockT;
 
 use super::{
 	ConfirmPeersMessage, Environment, Error, GossipEra, GossipMessage, KeyGenMessage, MessageWithSender, PeerIndex,
@@ -117,7 +118,7 @@ where
 
 impl<Client, Block, In, Out, Storage> Signer<Client, Block, In, Out, Storage>
 where
-	Client:  HeaderBackend<Block>+ProvideRuntimeApi + Send + Sync + 'static,
+	Client: HeaderBackend<Block> + ProvideRuntimeApi<Block> + Send + Sync + 'static,
 	Block: BlockT<Hash = H256>,
 	Block::Hash: Ord,
 	In: Stream<Item = MessageWithSender> + Unpin,
@@ -393,7 +394,7 @@ where
 
 impl<Client, Block, In, Out, Storage> Future for Signer<Client, Block, In, Out, Storage>
 where
-	Client:  HeaderBackend<Block>+ProvideRuntimeApi + Send + Sync + 'static,
+	Client: HeaderBackend<Block> + ProvideRuntimeApi<Block> + Send + Sync + 'static,
 	Block: BlockT<Hash = H256>,
 	Block::Hash: Ord,
 	In: Stream<Item = MessageWithSender> + Unpin,

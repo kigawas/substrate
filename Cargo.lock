@@ -6009,6 +6009,7 @@ dependencies = [
  "sc-network-test",
  "serde",
  "serde_json",
+ "sp-api",
  "sp-application-crypto",
  "sp-blockchain",
  "sp-core",

@@ -23,11 +23,12 @@ use serde::{Deserialize, Serialize};
 use sc_client_api::{blockchain::HeaderBackend, Backend, BlockchainEvents};
 use sc_network::{NetworkService, NetworkStateInfo, PeerId};
 use sc_network_gossip::Network as GossipNetwork;
+use sp_api::ProvideRuntimeApi;
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
 use sp_core::{offchain::OffchainStorage, Blake2Hasher, H256};
 use sp_offchain::STORAGE_PREFIX;
 use sp_runtime::generic::{BlockId, OpaqueDigestItemId};
-use sp_runtime::traits::{Block as BlockT, Header, ProvideRuntimeApi};
+use sp_runtime::traits::{Block as BlockT, Header};
 
 use sp_mpc::{get_storage_key, ConsensusLog, MpcApi, MpcRequest, OffchainStorageType, MPC_ENGINE_ID};
 
@@ -140,8 +141,8 @@ struct KeyGenWork<Client, Block: BlockT, Storage> {
 
 impl<Client, Block, Storage> KeyGenWork<Client, Block, Storage>
 where
-	Client: HeaderBackend<Block> + ProvideRuntimeApi + Send + Sync + 'static,
-	<Client as ProvideRuntimeApi>::Api: MpcApi<Block>,
+	Client: HeaderBackend<Block> + ProvideRuntimeApi<Block> + Send + Sync + 'static,
+	<Client as ProvideRuntimeApi<Block>>::Api: MpcApi<Block>,
 	Block: BlockT<Hash = H256> + Unpin,
 	Block::Hash: Ord,
 	Storage: OffchainStorage + 'static,
@@ -196,8 +197,8 @@ where
 
 impl<Client, Block, Storage> Future for KeyGenWork<Client, Block, Storage>
 where
-	Client: HeaderBackend<Block> + ProvideRuntimeApi + Send + Sync + 'static,
-	<Client as ProvideRuntimeApi>::Api: MpcApi<Block>,
+	Client: HeaderBackend<Block> + ProvideRuntimeApi<Block> + Send + Sync + 'static,
+	<Client as ProvideRuntimeApi<Block>>::Api: MpcApi<Block>,
 	Block: BlockT<Hash = H256> + Unpin,
 	Block::Hash: Ord,
 	Storage: OffchainStorage + 'static,
@@ -300,9 +301,9 @@ pub fn run_mpc_task<Client, Block, B, N, Ex>(
 	executor: Ex,
 ) -> ClientResult<impl futures01::Future<Item = (), Error = ()>>
 where
-	Client: HeaderBackend<Block> + ProvideRuntimeApi + BlockchainEvents<Block> + Send + Sync + 'static,
-	<Client as ProvideRuntimeApi>::Api: MpcApi<Block>,
-	B: Backend<Block, Blake2Hasher> + 'static,
+	Client: HeaderBackend<Block> + ProvideRuntimeApi<Block> + BlockchainEvents<Block> + Send + Sync + 'static,
+	<Client as ProvideRuntimeApi<Block>>::Api: MpcApi<Block>,
+	B: Backend<Block> + 'static,
 	Block: BlockT<Hash = H256> + Unpin,
 	Block::Hash: Ord,
 	N: Network<Block>,
