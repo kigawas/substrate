@@ -299,7 +299,7 @@ pub fn run_mpc_task<Client, Block, B, N, Ex>(
 	backend: Arc<B>,
 	network: N,
 	executor: Ex,
-) -> ClientResult<impl futures01::Future<Item = (), Error = ()>>
+) -> ClientResult<impl Future<Output = ()>>
 where
 	Client: HeaderBackend<Block> + ProvideRuntimeApi<Block> + BlockchainEvents<Block> + Send + Sync + 'static,
 	<Client as ProvideRuntimeApi<Block>>::Api: MpcApi<Block>,
@@ -362,7 +362,7 @@ where
 
 	let kgw = KeyGenWork::new(client, config, bridge, offchain_storage, rx).map_err(|e| error!("Error {:?}", e));
 
-	let worker = select(streamer, kgw).then(|_| ready(Ok(())));
+	let worker = select(streamer, kgw).then(|_| ready(()));
 
-	Ok(worker.compat())
+	Ok(worker)
 }
