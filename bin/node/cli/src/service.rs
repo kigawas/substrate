@@ -163,7 +163,7 @@ macro_rules! new_full {
 			.expect("Dev Seed always succeeds");
 		}
 		if participates_in_consensus {
-			let proposer = sc_basic_authority::ProposerFactory {
+			let proposer = sc_basic_authorship::ProposerFactory {
 				client: service.client(),
 				transaction_pool: service.transaction_pool(),
 			};
@@ -530,7 +530,7 @@ mod tests {
 
 				let parent_id = BlockId::number(service.client().chain_info().best_number);
 				let parent_header = service.client().header(&parent_id).unwrap().unwrap();
-				let mut proposer_factory = sc_basic_authority::ProposerFactory {
+				let mut proposer_factory = sc_basic_authorship::ProposerFactory {
 					client: service.client(),
 					transaction_pool: service.transaction_pool(),
 				};
